@@ -1,0 +1,146 @@
+================================================================================
+  MANUAL DE USUARIO — Sistema OATI Manuales de sistemas
+  Universidad Distrital Francisco José de Caldas
+================================================================================
+
+1. ¿Qué es este sistema?
+--------------------------------------------------------------------------------
+Es una aplicación web para elaborar, organizar y conservar manuales
+institucionales alineados con la plantilla OATI, y para archivar documentos
+ya generados como PDF sin convertirlos al editor interno.
+
+Hay dos tipos de registros en la biblioteca:
+
+  • Manuales OATI — Se crean en la aplicación, se editan por bloques
+    (portada, introducción, pasos, notas, etc.) y se pueden exportar a PDF
+    y Word generados desde la plantilla.
+
+  • Documentos solo PDF — Se suben como archivo .pdf. No se abren en el
+    editor OATI; sirven para tenerlos guardados y organizados. El icono del
+    ojito abre el archivo en otra pestaña; el de descarga guarda el PDF.
+
+
+2. Cómo entrar y qué necesita
+--------------------------------------------------------------------------------
+  • Navegador actualizado (Chrome, Edge, Firefox recomendado).
+  • El servidor backend (API) debe estar en ejecución.
+  • El frontend (interfaz web) suele ejecutarse en desarrollo en el puerto
+    4200; la aplicación envía las peticiones a la API a través de la ruta
+    /api (proxy configurado en el proyecto).
+
+Si aparece un error de conexión al cargar la biblioteca, compruebe que la API
+está levantada y que la URL del proxy coincide con la del servidor backend.
+
+
+3. Pantalla principal — Biblioteca documental
+--------------------------------------------------------------------------------
+En la pantalla inicial ve:
+
+  • Barra superior — Acciones globales: “Nuevo sistema”, “Subir PDF”,
+    “Crear manual”.
+
+  • Sin clasificar — Manuales que aún no están asignados a un sistema
+    o carpeta. Puede arrastrar tarjetas desde aquí o soltar aquí una
+    ficha para “quitar” sistema y carpeta (dejar sin clasificar).
+
+  • Sistemas (acordeón) — Cada sistema agrupa carpetas y un área
+    “En el sistema · sin carpeta” para manuales que pertenecen al sistema
+    pero no a una carpeta concreta.
+
+  • Carpetas dentro de cada sistema — Zonas donde puede soltar manuales
+    para clasificarlos.
+
+Cada manual aparece como una tarjeta con:
+  • Icono de arrastre (líneas) — para moverlo entre zonas.
+  • Lápiz — renombrar el título visible del manual (no cambia el PDF
+    subido en disco).
+  • Icono abrir en pestaña o descarga — los manuales OATI abren el editor;
+    los marcados “PDF” se abren con el ojito en otra pestaña o se descargan.
+
+
+4. Organizar con arrastrar y soltar
+--------------------------------------------------------------------------------
+  1. Pulse y mantenga el asa de arrastre de un manual.
+  2. Muévalo a otra zona: otra carpeta, “sin carpeta” del sistema o
+     “Sin clasificar”.
+  3. Al soltar, el sistema guarda la nueva ubicación en el servidor.
+
+Si la operación falla, la lista puede refrescarse sola; use “Actualizar”
+si necesita forzar la recarga.
+
+
+5. Crear un manual OATI (editable)
+--------------------------------------------------------------------------------
+  1. Pulse “Crear manual”.
+  2. Se crea un borrador y se abre el editor en una nueva vista.
+  3. Allí edita bloques fijos (1–6) y los del lienzo (“Paso a paso”, “Nota”).
+
+El código interno del manual y el título también se pueden ajustar desde
+la barra del editor según la versión desplegada.
+
+
+6. Subir un PDF
+--------------------------------------------------------------------------------
+  • Botón “Subir PDF” — elija un archivo .pdf.
+  • También puede arrastrar un .pdf desde su equipo y soltarlo en
+    “Sin clasificar”, en una carpeta o en “sin carpeta” del sistema;
+    así el documento queda ya clasificado al subir.
+
+Restricciones habituales: solo extensión .pdf; hay un tamaño máximo
+definido en el servidor (del orden de decenas de MB).
+
+Ese tipo de documento no se edita en el constructor OATI: use un editor
+de PDF o la fuente original en su PC y, si cambia el contenido, vuelva
+a subir el archivo según las políticas de su área.
+
+
+7. Editor OATI (resumen)
+--------------------------------------------------------------------------------
+  • Módulos 1–6 son fijos (portada, introducción, objetivo, etc.).
+  • “Paso a paso” y “Nota” se colocan en el lienzo arrastrando desde la
+    paleta.
+  • La portada puede incluir logos por URL o mediante carga de imagen,
+    según lo habilitado en su pantalla.
+  • La vista previa muestra un HTML cercano al que usa el servidor para
+    exportaciones.
+
+El guardado puede ser automático periódico mientras trabaja; si hay error
+al guardar, revise que la API responde y que no está editando un manual
+que sea “solo PDF” (esos no usan este editor).
+
+
+8. Exportar (manuales OATI)
+--------------------------------------------------------------------------------
+Desde el editor, las acciones de exportación a PDF y Word aplican a
+manuales con bloques OATI. Un documento solo almacenado como PDF subido
+no genera otro PDF desde la plantilla: use “ver” o “descargar” en la lista.
+
+
+9. Sistemas y carpetas — crear y mantener
+--------------------------------------------------------------------------------
+  • “Nuevo sistema” — pide un nombre; aparece en el acordeón.
+  • Dentro de un sistema, puede crear carpetas con el icono de carpeta.
+  • Renombrar o eliminar sistema/carpeta desde los iconos del encabezado.
+  Eliminar una carpeta suele dejar los manuales en el mismo sistema pero
+  “sin carpeta”. Eliminar un sistema puede dejar los manuales sin clasificar;
+  confirme los cuadros de diálogo antes de aceptar.
+
+
+10. Consejos prácticos
+--------------------------------------------------------------------------------
+  • Use títulos claros en “renombrar” para localizar manuales en listas largas.
+  • Si un enlace de edición lo devuelve a la biblioteca, es posible que ese
+    registro sea un PDF subido; ábralo con el ojito o descárguelo.
+  • Tras actualizar el código del sistema, refresque el navegador (F5) y
+    reinicie backend/frontend si el administrador lo indica.
+
+
+11. Soporte
+--------------------------------------------------------------------------------
+Ante fallos, anote: mensaje en pantalla, hora, navegador y si el problema
+es al guardar, al subir o al arrastrar. Eso agiliza la revisión por parte
+del equipo técnico.
+
+================================================================================
+Fin del manual de usuario (texto plano UTF-8). Puede copiarlo a Word si desea.
+================================================================================

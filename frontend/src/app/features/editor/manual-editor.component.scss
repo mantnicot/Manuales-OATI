@@ -1,0 +1,108 @@
+.editor-wrap {
+  padding: 12px;
+}
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr) minmax(320px, 1.25fr);
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .editor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.col-modulos mat-card,
+.col-lienzo mat-card,
+.col-preview mat-card {
+  height: 100%;
+}
+
+.static-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.static-btns button.active {
+  border-color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.palette-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: #fff;
+  cursor: grab;
+  font-size: 13px;
+}
+
+.drop-area {
+  min-height: 420px;
+  border: 2px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 8px;
+  background: #f8fafc;
+}
+
+.flow-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.flow-row.sel {
+  outline: 2px solid #2563eb;
+}
+
+.handle {
+  cursor: grab;
+  color: #64748b;
+}
+
+.preview-card iframe {
+  width: 100%;
+  height: calc(100vh - 200px);
+  min-height: 520px;
+  border: 0;
+  background: #fff;
+}
+
+.col-modulos {
+  /* Campos largos (URLs) y Material: evitar “cortes” visuales */
+  ::ng-deep .mat-mdc-form-field {
+    width: 100%;
+  }
+
+  ::ng-deep .mat-mdc-text-field-wrapper {
+    overflow: visible;
+  }
+
+  ::ng-deep .mat-mdc-form-field-infix {
+    min-width: 0;
+  }
+
+  ::ng-deep .mdc-notched-outline__leading,
+  ::ng-deep .mdc-notched-outline__notch,
+  ::ng-deep .mdc-notched-outline__trailing {
+    border-width: 1px;
+  }
+
+  input.mat-mdc-input-element,
+  textarea.mat-mdc-input-element {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}

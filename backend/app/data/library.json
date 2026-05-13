@@ -1,0 +1,17 @@
+{
+  "systems": [
+    {
+      "id": "6c79a138-c4ed-4a50-be6d-03839266e25c",
+      "name": "POLUX"
+    },
+    {
+      "id": "271aafc0-9e32-4e32-a6bc-da05e832e1c0",
+      "name": "CUMPLIDOS"
+    },
+    {
+      "id": "6038ba99-4cfb-410d-93fc-1258aae18096",
+      "name": "OIKOS"
+    }
+  ],
+  "folders": []
+}

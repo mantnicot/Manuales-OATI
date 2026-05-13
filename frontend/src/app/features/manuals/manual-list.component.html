@@ -1,0 +1,504 @@
+<mat-toolbar color="primary" class="!justify-between shadow-sm flex-wrap min-h-[56px] gap-2 py-2">
+  <div class="flex items-center gap-3">
+    <span class="font-semibold tracking-tight">OATI — Manuales de sistemas</span>
+    <span class="text-xs opacity-80 hidden sm:inline">Universidad Distrital Francisco José de Caldas</span>
+  </div>
+  <div class="flex flex-wrap items-center gap-2">
+    <button
+      mat-stroked-button
+      color="accent"
+      type="button"
+      (click)="addSystem()"
+      [disabled]="busy"
+      matTooltip="Añade un sistema para agrupar carpetas y manuales"
+      matTooltipShowDelay="250"
+    >
+      <mat-icon>domain</mat-icon>
+      Nuevo sistema
+    </button>
+    <button
+      mat-stroked-button
+      type="button"
+      (click)="pickPdfFile()"
+      [disabled]="busy"
+      matTooltip="Sube un PDF a la biblioteca (solo lectura, no se edita en OATI)"
+      matTooltipShowDelay="250"
+    >
+      <mat-icon>upload_file</mat-icon>
+      Subir PDF
+    </button>
+    <button
+      mat-flat-button
+      color="accent"
+      type="button"
+      (click)="createManual()"
+      [disabled]="busy"
+      matTooltip="Crea un nuevo manual con la plantilla oficial OATI"
+      matTooltipShowDelay="250"
+    >
+      <mat-icon>add</mat-icon>
+      Crear manual
+    </button>
+  </div>
+</mat-toolbar>
+<input
+  #pdfFileInput
+  type="file"
+  accept=".pdf,application/pdf"
+  class="sr-only absolute w-px h-px opacity-0 overflow-hidden -z-10"
+  tabindex="-1"
+  (change)="onPdfFileInputChange($event)"
+/>
+
+<main class="max-w-6xl mx-auto p-4 space-y-4">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <h1 class="text-xl font-semibold text-slate-800 m-0">Biblioteca documental</h1>
+    <button
+      mat-button
+      type="button"
+      (click)="reloadAll()"
+      [disabled]="busy"
+      matTooltip="Vuelve a cargar sistemas, carpetas y manuales desde el servidor"
+      matTooltipShowDelay="250"
+    >
+      <mat-icon>refresh</mat-icon>
+      Actualizar
+    </button>
+  </div>
+
+  <div *ngIf="error" class="rounded border border-red-200 bg-red-50 text-red-800 px-4 py-3 text-sm">
+    {{ error }}
+  </div>
+
+  <mat-progress-spinner *ngIf="busy && !manuals.length" diameter="36" mode="indeterminate" class="mx-auto" />
+
+  <p *ngIf="manuals.length || systems.length" class="text-sm text-slate-600 m-0">
+    Cree <strong>sistemas</strong> y <strong>carpetas</strong> para agrupar. Arrastre cada manual desde «Sin clasificar» o entre carpetas.
+    Los manuales <strong>OATI</strong> pueden <strong>visualizarse</strong> con el ojito (HTML en servidor); en esa pantalla hay un botón para <strong>descargar PDF</strong>.
+    El icono de ventana abre el editor. Los archivos <strong>.pdf</strong> subidos usan el ojito para ver y la flecha para descargar.
+    Puede <strong>renombrar</strong> con el lápiz y <strong>eliminar</strong> con la papelera.
+  </p>
+
+  <mat-card *ngIf="manuals.length" class="!p-3">
+      <div class="text-sm font-semibold text-slate-800 mb-2">Sin clasificar</div>
+      <div
+        cdkDropList
+        id="bin-unassigned"
+        [cdkDropListData]="binUnassigned"
+        [cdkDropListConnectedTo]="dropListIds"
+        (cdkDropListDropped)="onDrop($event, 'unassigned')"
+        (dragover)="onPdfDragOver($event)"
+        (drop)="onPdfDrop($event, 'unassigned')"
+        class="min-h-14 rounded border border-dashed border-slate-300 bg-slate-50 p-2 flex flex-wrap gap-2"
+      >
+        <div
+          *ngFor="let m of binUnassigned"
+          cdkDrag
+          class="flex items-center gap-1 rounded bg-white border border-slate-200 px-2 py-1 text-sm shadow-sm cursor-grab"
+        >
+          <mat-icon
+            cdkDragHandle
+            class="!text-lg text-slate-400 cursor-grab"
+            matTooltip="Arrastrar para mover el manual a otra zona"
+            matTooltipShowDelay="250"
+            >drag_indicator</mat-icon
+          >
+          <span
+            *ngIf="isPdfManual(m)"
+            class="text-[10px] font-semibold uppercase text-rose-900 bg-rose-100 px-1 rounded shrink-0"
+            matTooltip="Documento PDF almacenado (no es un manual editable OATI)"
+            matTooltipShowDelay="250"
+            >PDF</span
+          >
+          <span class="font-medium text-slate-800 max-w-[200px] truncate">{{ m.title }}</span>
+          <button
+            mat-icon-button
+            type="button"
+            class="!w-8 !h-8"
+            (click)="renameManual(m); $event.stopPropagation()"
+            aria-label="Renombrar"
+            matTooltip="Cambiar el título del manual"
+            matTooltipShowDelay="250"
+          >
+            <mat-icon class="!text-lg">edit</mat-icon>
+          </button>
+          <a
+            *ngIf="!isPdfManual(m)"
+            mat-icon-button
+            class="!w-8 !h-8"
+            [href]="htmlPreviewUrl(m.id)"
+            target="_blank"
+            rel="noopener noreferrer"
+            (click)="$event.stopPropagation()"
+            aria-label="Vista previa HTML"
+            matTooltip="Ver el manual en otra pestaña (HTML) y descargar PDF"
+            matTooltipShowDelay="250"
+          >
+            <mat-icon class="!text-lg">visibility</mat-icon>
+          </a>
+          <a
+            *ngIf="!isPdfManual(m)"
+            mat-icon-button
+            class="!w-8 !h-8"
+            [routerLink]="['/manual', m.id]"
+            (click)="$event.stopPropagation()"
+            aria-label="Editar"
+            matTooltip="Abrir el editor OATI para modificar el manual"
+            matTooltipShowDelay="250"
+          >
+            <mat-icon class="!text-lg">open_in_new</mat-icon>
+          </a>
+          <a
+            *ngIf="isPdfManual(m)"
+            mat-icon-button
+            class="!w-8 !h-8"
+            [href]="pdfPreviewUrl(m.id)"
+            target="_blank"
+            rel="noopener noreferrer"
+            (click)="$event.stopPropagation()"
+            aria-label="Ver documento en otra pestaña"
+            matTooltip="Abrir el PDF en una pestaña nueva"
+            matTooltipShowDelay="250"
+          >
+            <mat-icon class="!text-lg">visibility</mat-icon>
+          </a>
+          <a
+            *ngIf="isPdfManual(m)"
+            mat-icon-button
+            class="!w-8 !h-8"
+            [href]="pdfDownloadUrl(m.id)"
+            (click)="$event.stopPropagation()"
+            aria-label="Descargar PDF"
+            matTooltip="Descargar el archivo PDF"
+            matTooltipShowDelay="250"
+          >
+            <mat-icon class="!text-lg">download</mat-icon>
+          </a>
+          <button
+            mat-icon-button
+            type="button"
+            color="warn"
+            class="!w-8 !h-8"
+            (click)="deleteManual(m); $event.stopPropagation()"
+            [disabled]="busy"
+            aria-label="Eliminar manual"
+            matTooltip="Eliminar este documento de la biblioteca (se pedirá confirmación)"
+            matTooltipShowDelay="250"
+          >
+            <mat-icon class="!text-lg">delete</mat-icon>
+          </button>
+        </div>
+        <span *ngIf="!binUnassigned.length" class="text-xs text-slate-500 self-center">Vacío: arrastre aquí para quitar sistema y carpeta.</span>
+      </div>
+    </mat-card>
+
+    <mat-accordion *ngIf="systems.length" multi displayMode="flat" class="space-y-2">
+      <mat-expansion-panel *ngFor="let s of systems" class="!shadow border border-slate-200 rounded-lg">
+        <mat-expansion-panel-header class="!h-14">
+          <mat-panel-title>
+            <span class="font-medium">{{ s.name }}</span>
+          </mat-panel-title>
+          <mat-panel-description class="!flex !items-center !justify-end gap-0 !mr-2">
+            <button
+              mat-icon-button
+              type="button"
+              (click)="addFolder(s); $event.stopPropagation()"
+              matTooltip="Crear una carpeta nueva dentro de este sistema"
+              matTooltipShowDelay="250"
+            >
+              <mat-icon>create_new_folder</mat-icon>
+            </button>
+            <button
+              mat-icon-button
+              type="button"
+              (click)="renameSystem(s); $event.stopPropagation()"
+              matTooltip="Cambiar el nombre del sistema"
+              matTooltipShowDelay="250"
+            >
+              <mat-icon>edit</mat-icon>
+            </button>
+            <button
+              mat-icon-button
+              type="button"
+              color="warn"
+              (click)="deleteSystem(s); $event.stopPropagation()"
+              matTooltip="Eliminar el sistema y su organización (no borra los manuales; pasan a «Sin clasificar»)"
+              matTooltipShowDelay="250"
+            >
+              <mat-icon>delete</mat-icon>
+            </button>
+          </mat-panel-description>
+        </mat-expansion-panel-header>
+
+        <div class="space-y-4 pb-2">
+          <div
+            *ngFor="let f of foldersOf(s.id)"
+            class="rounded-lg border border-slate-200 bg-white p-2"
+          >
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-semibold text-slate-700">{{ f.name }}</span>
+              <span>
+                <button
+                  mat-icon-button
+                  type="button"
+                  (click)="renameFolder(f)"
+                  matTooltip="Renombrar esta carpeta"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon>edit</mat-icon>
+                </button>
+                <button
+                  mat-icon-button
+                  type="button"
+                  color="warn"
+                  (click)="deleteFolder(f)"
+                  matTooltip="Eliminar la carpeta (los manuales siguen en el sistema, sin carpeta)"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </span>
+            </div>
+            <div
+              cdkDropList
+              [id]="'bin-fold-' + f.id"
+              [cdkDropListData]="binFolderMap.get(f.id)!"
+              [cdkDropListConnectedTo]="dropListIds"
+              (cdkDropListDropped)="onDrop($event, 'folder', s.id, f.id)"
+              (dragover)="onPdfDragOver($event)"
+              (drop)="onPdfDrop($event, 'folder', s.id, f.id)"
+              class="min-h-12 rounded border border-dashed border-slate-200 bg-slate-50 p-2 flex flex-wrap gap-2"
+            >
+              <div
+                *ngFor="let m of binFolderMap.get(f.id) || []"
+                cdkDrag
+                class="flex items-center gap-1 rounded bg-white border border-slate-200 px-2 py-1 text-sm shadow-sm cursor-grab"
+              >
+                <mat-icon
+                  cdkDragHandle
+                  class="!text-lg text-slate-400"
+                  matTooltip="Arrastrar para mover el manual a otra zona"
+                  matTooltipShowDelay="250"
+                  >drag_indicator</mat-icon
+                >
+                <span
+                  *ngIf="isPdfManual(m)"
+                  class="text-[10px] font-semibold uppercase text-rose-900 bg-rose-100 px-1 rounded shrink-0"
+                  matTooltip="Documento PDF almacenado (no es un manual editable OATI)"
+                  matTooltipShowDelay="250"
+                  >PDF</span
+                >
+                <span class="font-medium text-slate-800 max-w-[180px] truncate">{{ m.title }}</span>
+                <button
+                  mat-icon-button
+                  type="button"
+                  class="!w-8 !h-8"
+                  (click)="renameManual(m); $event.stopPropagation()"
+                  matTooltip="Cambiar el título del manual"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">edit</mat-icon>
+                </button>
+                <a
+                  *ngIf="!isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [href]="htmlPreviewUrl(m.id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Vista previa HTML"
+                  matTooltip="Ver el manual en otra pestaña (HTML) y descargar PDF"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">visibility</mat-icon>
+                </a>
+                <a
+                  *ngIf="!isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [routerLink]="['/manual', m.id]"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Editar"
+                  matTooltip="Abrir el editor OATI para modificar el manual"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">open_in_new</mat-icon>
+                </a>
+                <a
+                  *ngIf="isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [href]="pdfPreviewUrl(m.id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Ver documento en otra pestaña"
+                  matTooltip="Abrir el PDF en una pestaña nueva"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">visibility</mat-icon>
+                </a>
+                <a
+                  *ngIf="isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [href]="pdfDownloadUrl(m.id)"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Descargar PDF"
+                  matTooltip="Descargar el archivo PDF"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">download</mat-icon>
+                </a>
+                <button
+                  mat-icon-button
+                  type="button"
+                  color="warn"
+                  class="!w-8 !h-8"
+                  (click)="deleteManual(m); $event.stopPropagation()"
+                  [disabled]="busy"
+                  aria-label="Eliminar manual"
+                  matTooltip="Eliminar este documento de la biblioteca (se pedirá confirmación)"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">delete</mat-icon>
+                </button>
+              </div>
+              <span *ngIf="!(binFolderMap.get(f.id)?.length)" class="text-xs text-slate-500">Arrastre manuales aquí</span>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-blue-100 bg-blue-50/50 p-2">
+            <div class="text-xs font-semibold text-slate-600 mb-2">En el sistema · sin carpeta</div>
+            <div
+              cdkDropList
+              [id]="'bin-sys-' + s.id"
+              [cdkDropListData]="binSystemRootMap.get(s.id)!"
+              [cdkDropListConnectedTo]="dropListIds"
+              (cdkDropListDropped)="onDrop($event, 'system', s.id)"
+              (dragover)="onPdfDragOver($event)"
+              (drop)="onPdfDrop($event, 'system', s.id)"
+              class="min-h-12 rounded border border-dashed border-blue-200 bg-white p-2 flex flex-wrap gap-2"
+            >
+              <div
+                *ngFor="let m of binSystemRootMap.get(s.id) || []"
+                cdkDrag
+                class="flex items-center gap-1 rounded bg-white border border-slate-200 px-2 py-1 text-sm shadow-sm cursor-grab"
+              >
+                <mat-icon
+                  cdkDragHandle
+                  class="!text-lg text-slate-400"
+                  matTooltip="Arrastrar para mover el manual a otra zona"
+                  matTooltipShowDelay="250"
+                  >drag_indicator</mat-icon
+                >
+                <span
+                  *ngIf="isPdfManual(m)"
+                  class="text-[10px] font-semibold uppercase text-rose-900 bg-rose-100 px-1 rounded shrink-0"
+                  matTooltip="Documento PDF almacenado (no es un manual editable OATI)"
+                  matTooltipShowDelay="250"
+                  >PDF</span
+                >
+                <span class="font-medium text-slate-800 max-w-[180px] truncate">{{ m.title }}</span>
+                <button
+                  mat-icon-button
+                  type="button"
+                  class="!w-8 !h-8"
+                  (click)="renameManual(m); $event.stopPropagation()"
+                  matTooltip="Cambiar el título del manual"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">edit</mat-icon>
+                </button>
+                <a
+                  *ngIf="!isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [href]="htmlPreviewUrl(m.id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Vista previa HTML"
+                  matTooltip="Ver el manual en otra pestaña (HTML) y descargar PDF"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">visibility</mat-icon>
+                </a>
+                <a
+                  *ngIf="!isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [routerLink]="['/manual', m.id]"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Editar"
+                  matTooltip="Abrir el editor OATI para modificar el manual"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">open_in_new</mat-icon>
+                </a>
+                <a
+                  *ngIf="isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [href]="pdfPreviewUrl(m.id)"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Ver documento en otra pestaña"
+                  matTooltip="Abrir el PDF en una pestaña nueva"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">visibility</mat-icon>
+                </a>
+                <a
+                  *ngIf="isPdfManual(m)"
+                  mat-icon-button
+                  class="!w-8 !h-8"
+                  [href]="pdfDownloadUrl(m.id)"
+                  (click)="$event.stopPropagation()"
+                  aria-label="Descargar PDF"
+                  matTooltip="Descargar el archivo PDF"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">download</mat-icon>
+                </a>
+                <button
+                  mat-icon-button
+                  type="button"
+                  color="warn"
+                  class="!w-8 !h-8"
+                  (click)="deleteManual(m); $event.stopPropagation()"
+                  [disabled]="busy"
+                  aria-label="Eliminar manual"
+                  matTooltip="Eliminar este documento de la biblioteca (se pedirá confirmación)"
+                  matTooltipShowDelay="250"
+                >
+                  <mat-icon class="!text-lg">delete</mat-icon>
+                </button>
+              </div>
+              <span *ngIf="!binSystemRootMap.get(s.id)?.length" class="text-xs text-slate-500">Opcional: agrupe solo por sistema</span>
+            </div>
+          </div>
+        </div>
+      </mat-expansion-panel>
+    </mat-accordion>
+
+  <p *ngIf="!manuals.length && !systems.length && !busy" class="text-sm text-slate-600">
+    Cree un manual o defina <strong>sistemas</strong> y <strong>carpetas</strong> para organizar la biblioteca.
+  </p>
+</main>
+
+<div
+  *ngIf="busy"
+  class="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-900/40 backdrop-blur-[1px]"
+  aria-live="polite"
+  aria-busy="true"
+>
+  <div
+    class="rounded-xl bg-white shadow-xl px-10 py-8 flex flex-col items-center gap-4 max-w-sm mx-4 border border-slate-200"
+  >
+    <mat-progress-spinner diameter="48" mode="indeterminate" />
+    <p class="text-sm text-slate-700 m-0 text-center font-medium">{{ overlayMessage || 'Procesando…' }}</p>
+  </div>
+</div>

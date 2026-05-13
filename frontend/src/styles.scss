@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+
+:root {
+  --oati-font-doc: Arial, Helvetica, sans-serif;
+  --oati-title-color: #434343;
+  --oati-subtitle-color: #666666;
+}
+
+body {
+  margin: 0;
+  font-family: var(--oati-font-doc);
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.doc-surface {
+  font-family: var(--oati-font-doc);
+  line-height: 1.15;
+}

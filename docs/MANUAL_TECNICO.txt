@@ -1,0 +1,198 @@
+================================================================================
+  MANUAL TÉCNICO — OATI Manuales (arquitectura y componentes)
+  Para desarrolladores que mantienen o extienden el repositorio
+================================================================================
+
+1. Visión general
+--------------------------------------------------------------------------------
+Monorepo con:
+
+  • backend/     — API REST con FastAPI (Python), persistencia en JSON en
+                   desarrollo/demo, capas domain / application / infrastructure.
+
+  • frontend/    — SPA Angular (standalone components, Material, CDK
+                   drag-drop, NgRx Signals store en el editor).
+
+La API se monta bajo un prefijo configurable (por defecto /api/v1) vía
+app.config.Settings.api_prefix. CORS por defecto orientado a localhost:4200.
+
+
+2. Backend — Estructura de carpetas (app/)
+--------------------------------------------------------------------------------
+  domain/
+    entities/manual.py      — Manual (dataclass), Block, ManualStatus enum.
+    ports/repositories.py   — Protocol ManualRepository.
+
+  application/
+    use_cases/create_manual.py — CreateManual, DuplicateManual.
+    services/
+      document_html.py      — HTML de documento a partir de bloques.
+      export_docx.py        — Generación DOCX (python-docx).
+      export_pdf.py         — Generación PDF (ReportLab u stack declarado).
+      oati_template.py      — Bloques por defecto plantilla OATI.
+      plain_text.py, export_media.py, export_html_images.py — utilidades
+                              de contenido/medios en exportaciones.
+
+  infrastructure/
+    api/
+      routes.py             — Agrega routers manuals + library al api_router.
+      routes_manuals.py     — CRUD manuales, render HTML, exports, upload PDF,
+                              pdf-file download, validaciones PDF almacenado vs OATI.
+      routes_library.py     — CRUD sistemas/carpetas (biblioteca).
+    persistence/
+      in_memory_manual_repository.py — Repo JSON: data/manuals.json
+      library_store.py      — Biblioteca: data/library.json (systems, folders)
+
+
+3. Persistencia y ficheros de datos
+--------------------------------------------------------------------------------
+Rutas típicas (relativas a backend/app/):
+
+  data/manuals.json       — Lista serializada de manuales (blocks, meta, etc.)
+  data/library.json       — systems[], folders[] con UUID y nombres.
+  data/uploads/{uuid}.pdf — Binarios de manuales storage_kind=pdf
+                            (meta.pdf_file = "uploads/{uuid}.pdf").
+  Los registros legacy storage_kind=word se omiten al cargar y se reescribe
+  manuals.json sin ellos en el próximo guardado.
+
+InMemoryManualRepository carga al iniciar, guarda tras cada save soft_delete
+y operaciones clear_folder / clear_system.
+
+library_store: get_library_store() usado en rutas para validar folder_id
+y alinear system_id al actualizar manual o subir PDF.
+
+
+4. Modelo de manual y metadatos relevantes
+--------------------------------------------------------------------------------
+Manual: id (UUID), title, code, system_id, folder_id, status, blocks[],
+meta{}, current_version, timestamps.
+
+Manuales “solo PDF” (subidos):
+  meta["storage_kind"] == "pdf"
+  meta["original_filename"], meta["pdf_file"] (ruta relativa bajo data/)
+
+En routes_manuals.py, _is_pdf_storage_manual() centraliza la comprobación.
+PATCH ignora blocks y meta para esos registros; export/preview/duplicate
+tienen guardas; DELETE borra el blob en disco si existe.
+
+POST /manuals/actions/upload-pdf — multipart: file, Form opcionales title,
+code, system_id, folder_id (multipart/python-multipart).
+
+
+5. API — Endpoints principales (prefijo /api/v1)
+--------------------------------------------------------------------------------
+Manuales (router prefix /manuals):
+  GET    /manuals                    — Lista + filtros query.
+  POST   /manuals                    — Crea manual OATI (JSON).
+  GET    /manuals/{uuid}             — Detalle.
+  PATCH  /manuals/{uuid}             — Actualización parcial; blocks vía
+                                       model_dump → dicts → BlockDTO validate.
+  DELETE /manuals/{uuid}             — Archiva; elimina .pdf si pdf storage.
+  POST   /manuals/{uuid}/duplicate   — Bloqueado si storage_kind pdf.
+  POST   /manuals/actions/render-html — HTML snapshot (cuerpo JSON manual).
+  POST   /manuals/actions/upload-pdf — Subida .pdf.
+  GET    /manuals/{uuid}/pdf-file   — Descarga / inline (?inline=1) PDF original.
+  GET    /manuals/{uuid}/preview     — HTML (no pdf subido).
+  GET    /manuals/{uuid}/export.docx|export.pdf — No aplica a pdf subido.
+
+Biblioteca (routes_library): CRUD sistemas/carpetas bajo /api/v1/library
+(consultar routes_library.py para paths exactos).
+
+
+6. Frontend — Angular
+--------------------------------------------------------------------------------
+  src/app/app.routes.ts
+    ''   → ManualListComponent
+    manual/:id → ManualEditorComponent
+
+  core/models/manual.models.ts
+    Tipos de bloques OATI y legacy, Manual, isPdfStorageManual().
+
+  core/services/manual-api.service.ts
+    list, get, create, update, duplicate, archive, renderPreviewHtml,
+    uploadPdf (FormData → actions/upload-pdf), pdfFileUrl.
+
+  core/services/library-api.service.ts
+    Snapshot de sistemas/carpetas y mutaciones.
+
+  features/manuals/manual-list.component.ts|.html
+    forkJoin manuals + library; CDK drag-drop entre listas conectadas;
+    bins por folder/system/unassigned; nativo drop de .pdf;
+    UI diferenciada PDF subido vs editable.
+
+  features/manuals/quick-name-dialog.component.ts
+    Diálogos de nombre para sistemas/carpetas/título manual.
+
+  features/editor/manual-editor.component.ts|.html
+    UI del constructor: bloques estáticos, flujo, preview iframe, autosave,
+    export. Si isPdfStorageManual tras load → snack + navigate('/').
+
+  features/editor/manual-editor.store.ts
+    NgRx signalStore: load/save, patchBlocks, patchManualMeta, exports blob.
+
+  core/oati/oati-manual.ts — normalizeManual, migración v2, extractors.
+  core/preview/document-preview.ts — Preview local aproximado.
+  core/oati/oati-images.ts — Escalado de imágenes en preview.
+
+Proxy desarrollo: frontend/proxy.conf.json — /api → backend (p. ej. 8000).
+
+
+7. Flujos técnicos destacados
+--------------------------------------------------------------------------------
+  • Clasificación drag-drop: CDK actualiza arrays locales y dispara
+    PATCH { system_id, folder_id }; backend ajusta system_id si folder_id
+    está presente (folder pertenece a sistema).
+
+  • Guardado editor: PATCH con blocks + meta; conversión dict en servidor
+    (_domain_blocks_from_payload) tras model_dump.
+
+  • Render consistente: cliente puede llamar POST render-html con el mismo
+    JSON que exports usan vía document_html.
+
+
+8. Configuración y despliegue
+--------------------------------------------------------------------------------
+  backend: Settings en app/config.py (.env opcional): api_prefix, cors_origins,
+  placeholders DB/Redis/S3 (el repo actual usa JSON local como almacén).
+
+  Arranque típico API: uvicorn app.main:app --reload --port 8000
+  Frontend: npm start / ng serve con proxy.
+
+  Asegure que data/ tenga permisos de escritura para manuals.json,
+  library.json y uploads/.
+
+
+9. Extensión y buenas prácticas
+--------------------------------------------------------------------------------
+  • Nuevos tipos de bloque: extender entidades, DTOs, plantilla OATI,
+    document_html, export_docx/export_pdf y tipos TS + normalización.
+
+  • Autenticación: Settings incluye jwt_* pero el flujo actual puede ser
+    abierto en dev; cierre brechas antes de producción.
+
+  • Sustituir JSON por DB: implementar ManualRepository asíncrono real y
+    migrar serialización; mantener contratos de API.
+
+  • Tests: no hay batería obligatoria descrita; añadir pruebas de rutas
+    library + manuals (incl. upload multipart) y pruebas de arrastre a
+    nivel E2E opcional.
+
+  • Tamaño uploads y límites: _PDF_UPLOAD_MAX_BYTES en routes_manuals.py;
+    ajustar según infraestructura / proxy.
+
+
+10. Referencia rápida de archivos clave
+--------------------------------------------------------------------------------
+  Backend API manuales ... backend/app/infrastructure/api/routes_manuals.py
+  Backend API biblioteca .. backend/app/infrastructure/api/routes_library.py
+  Repo JSON manuales .... backend/app/infrastructure/persistence/in_memory_manual_repository.py
+  Store biblioteca ...... backend/app/infrastructure/persistence/library_store.py
+  Entidad Manual ........ backend/app/domain/entities/manual.py
+  Lista Angular ......... frontend/src/app/features/manuals/manual-list.component.ts
+  Editor Angular ........ frontend/src/app/features/editor/manual-editor.component.ts
+  Cliente HTTP manuales . frontend/src/app/core/services/manual-api.service.ts
+
+================================================================================
+Fin del manual técnico (UTF-8). Actualizar este documento cuando cambien
+contratos de API o rutas de persistencia.
+================================================================================
