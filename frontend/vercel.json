@@ -1,8 +1,11 @@
 {
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/frontend/browser",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "https://manuales-oati-api.onrender.com/api/$1"
+      "source": "/api/:path*",
+      "destination": "https://manuales-oati-api.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
