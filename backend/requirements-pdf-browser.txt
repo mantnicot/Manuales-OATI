@@ -1,0 +1,7 @@
+# Opcional: PDF HTML de guías rápidas en Windows cuando WeasyPrint no está instalado.
+# Tras pip install playwright, el backend usará Chrome o Edge del sistema si existen,
+# sin descargar Chromium (evita errores TLS en proxies corporativos).
+#
+# Solo en servidores sin Chrome/Edge: python -m playwright install chromium
+#
+playwright>=1.49.0

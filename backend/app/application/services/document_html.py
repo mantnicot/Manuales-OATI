@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextvars
 import html
+import re
 from urllib.parse import quote
 
 from app.application.services.export_media import normalize_media_url, src_to_data_url
@@ -97,7 +98,11 @@ def _img_src_for_html(from_resolve: str) -> str:
         return ""
     base = _html_asset_base.get()
     if s.startswith("data:"):
-        return html.escape(s, quote=True)
+        # JSON multilínea o espacios en base64 rompen src="..." en HTML (la imagen no carga).
+        s = re.sub(r"\s+", "", s)
+        if "'" in s:
+            s = s.replace("'", "%27")
+        return s
     inlined = src_to_data_url(s, base)
     if inlined:
         return html.escape(inlined, quote=True)
@@ -468,6 +473,12 @@ def blocks_to_html(manual: Manual, asset_base_url: str | None = None) -> str:
     base = base_raw.rstrip("/") + "/"
     token = _html_asset_base.set(base)
     try:
+        from app.application.services.quick_guide_common import is_quick_guide_manual  # noqa: PLC0415
+
+        if is_quick_guide_manual(manual):
+            from app.application.services.quick_guide_document import quick_guide_html  # noqa: PLC0415
+
+            return quick_guide_html(manual)
         if manual.blocks and any(b.type == "oati_cover" for b in manual.blocks):
             return oati_v2_html(manual)
         parts: list[str] = []

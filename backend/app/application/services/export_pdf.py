@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from io import BytesIO
-from xml.sax.saxutils import escape
+from pathlib import Path
+import tempfile
+from xml.sax.saxutils import escape, quoteattr
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -24,7 +28,19 @@ from app.application.services.document_html import (
 )
 from app.application.services.export_media import image_bytes_from_src
 from app.application.services.plain_text import plain_from_html, soft_wrap_long_tokens
+from app.application.services.quick_guide_common import is_qg_page_block, is_quick_guide_manual
 from app.domain.entities.manual import Block, Manual
+
+logger = logging.getLogger(__name__)
+
+_RL_DEFAULT_IMG_MAX_HEIGHT_PT = float(min(float(A4[0]), float(A4[1]))) - float(3 * cm)
+
+
+@dataclass(frozen=True)
+class PdfBuildResult:
+    content: bytes
+    engine: str
+    styled: bool
 
 
 def _paragraph_lines(text: str, style: ParagraphStyle) -> list[Paragraph]:
@@ -37,23 +53,171 @@ def _paragraph_lines(text: str, style: ParagraphStyle) -> list[Paragraph]:
     return [Paragraph(body, style)]
 
 
+def _qg_inject_base_href(html_doc: str, base_href: str) -> str:
+    """Añade <base href=…> tras <head> para que Chromium resuelva rutas relativas al API."""
+
+    lowered = html_doc.lower()
+    key = "<head>"
+    idx = lowered.find(key)
+    if idx < 0:
+        return html_doc
+    insert_at = idx + len(key)
+    stripped = base_href.strip()
+    normalized = stripped.rstrip("/") + "/" if stripped else "/"
+    tag = "<base href=" + quoteattr(normalized) + ">"
+    return html_doc[:insert_at] + tag + html_doc[insert_at:]
+
+
+def _try_quick_guide_playwright(html: str, base_href: str) -> tuple[bytes, str] | None:
+    """PDF maquetado con HTML+CSS mediante Playwright.
+
+    Por defecto intenta **Google Chrome** y **Microsoft Edge** ya instalados (``channel``),
+    sin descargar Chromium desde CDN (útil ante proxies SSL corporativos). Si ambos fallan,
+    usa el Chromium empaquetado de Playwright (requiere ``playwright install chromium`` previo).
+
+    Canal forzado: variable de entorno ``PLAYWRIGHT_PDF_CHANNEL`` (``chrome`` | ``msedge`` | ``chromium``).
+    """
+
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: PLC0415
+    except ImportError:
+        logger.info("Playwright no está instalado: omitiendo PDF HTML para la guía rápida.")
+        return None
+
+    from app.config import get_settings  # noqa: PLC0415
+
+    merged = _qg_inject_base_href(html, base_href)
+    tmp_path: Path | None = None
+
+    configured = (get_settings().playwright_pdf_channel or "").strip().lower()
+    if configured in ("chromium", "bundled", "builtin"):
+        channel_order: list[str | None] = [None]
+    elif configured in ("chrome", "msedge"):
+        channel_order = [configured]
+    elif configured:
+        logger.warning(
+            "PLAYWRIGHT_PDF_CHANNEL=%r no reconocido (use chrome, msedge o chromium); usando auto.",
+            configured,
+        )
+        channel_order = ["chrome", "msedge", None]
+    else:
+        # Windows: Chrome o Edge suelen estar sin descargar binarios de Playwright.
+        channel_order = ["chrome", "msedge", None]
+
+    last_err: BaseException | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".html",
+            delete=False,
+            prefix="manuales-qg-",
+        ) as fh:
+            fh.write(merged)
+            tmp_path = Path(fh.name)
+        uri = tmp_path.resolve().as_uri()
+
+        launch_kw_base: dict[str, object] = {
+            "headless": True,
+            "args": ["--disable-dev-shm-usage", "--disable-gpu"],
+        }
+
+        for channel in channel_order:
+            try:
+                with sync_playwright() as pw:
+                    if channel is None:
+                        browser = pw.chromium.launch(**launch_kw_base)
+                        engine_slug = "playwright_chromium_builtin"
+                    else:
+                        browser = pw.chromium.launch(**launch_kw_base, channel=channel)
+                        engine_slug = f"playwright_{channel}"
+                    try:
+                        page = browser.new_page()
+                        page.set_default_navigation_timeout(120_000)
+                        page.emulate_media(media="screen")
+                        page.goto(uri, wait_until="load")
+                        pdf_bytes = page.pdf(
+                            print_background=True,
+                            prefer_css_page_size=True,
+                            omit_background=False,
+                            margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
+                        )
+                        logger.info(
+                            "PDF guía rápida generado vía Playwright (%s)",
+                            engine_slug.replace("playwright_", ""),
+                        )
+                        return (pdf_bytes, engine_slug)
+                    finally:
+                        browser.close()
+            except BaseException as e:
+                last_err = e
+                readable = channel if channel is not None else "chromium_embebido"
+                logger.info(
+                    "Playwright canal %s no disponible (%s); probando alternativa.",
+                    readable,
+                    e,
+                )
+
+        logger.warning(
+            "Playwright no pudo abrir ningún navegador para PDF (instale Chrome o Edge, o ejecute playwright install chromium).",
+            exc_info=last_err,
+        )
+        return None
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def _manual_to_html_pdf_inputs(manual: Manual) -> tuple[str, str]:
+    from app.application.services.document_html import blocks_to_html  # noqa: PLC0415
+
+    from app.config import get_settings  # noqa: PLC0415
+
+    settings = get_settings()
+    base = settings.asset_origin.rstrip("/") + "/"
+    html = blocks_to_html(manual, asset_base_url=base)
+    return html, base
+
+
 def _reportlab_figure_bits(
     src: str,
     caption: str,
     width_pct: int,
     caption_style: ParagraphStyle,
+    *,
+    usable_width_pts: float | None = None,
+    max_height_pts: float | None = None,
 ) -> list:
+    """Inserta una imagen en el story de ReportLab, escalándola dentro de un recuadro.
+
+    El ancho base sigue ``width_pct`` sobre ``usable_width_pts`` o, si no se indica, sobre
+    ``A4[0]-4cm``. El alto se acota siempre con ``max_height_pts`` o, si es ``None``, con
+    ``_RL_DEFAULT_IMG_MAX_HEIGHT_PT`` (lado corto A4 menos márgenes), para evitar el error
+    de ReportLab *Flowable … too large* en cabeceras de página estrechas (p. ej. A4 horizontal).
+    """
     parts: list = []
     raw = image_bytes_from_src(src)
     pct = max(25, min(100, int(width_pct)))
-    usable = A4[0] - 4 * cm
-    target_w = usable * pct / 100
+    default_usable_w = float(A4[0]) - float(4 * cm)
+    usable_w = float(usable_width_pts) if usable_width_pts is not None else default_usable_w
+    target_w = usable_w * (pct / 100.0)
+    # Tope alto razonable en una página A4: lado corto (~595pt) menos márgenes. Evita RL
+    # "Flowable … too large" incluso cuando el llamador antiguo no pasa ``max_height_pts``.
+    ceiling_h = _RL_DEFAULT_IMG_MAX_HEIGHT_PT if max_height_pts is None else float(max_height_pts)
     if raw:
         try:
             ir = ImageReader(BytesIO(raw))
             iw, ih = ir.getSize()
-            scale = target_w / float(iw)
-            parts.append(RLImage(BytesIO(raw), width=target_w, height=ih * scale))
+            if iw <= 0 or ih <= 0:
+                raise ValueError("Natural image dimensions not available")
+            scale = min(target_w / float(iw), ceiling_h / float(ih))
+            rw = float(iw) * scale
+            rh = float(ih) * scale
+            parts.append(RLImage(BytesIO(raw), width=rw, height=rh))
         except Exception:
             parts.append(Paragraph(escape("[Imagen no incluida en PDF]"), caption_style))
     if caption:
@@ -220,7 +384,9 @@ def _append_pdf_oati(
     styles: dict[str, ParagraphStyle],
     b: Block,
     img_idx: dict[str, int],
+    figure_layout: dict[str, float] | None = None,
 ) -> None:
+    kw = figure_layout or {}
     d = b.data
     t = b.type
     normal = styles["normal"]
@@ -236,7 +402,7 @@ def _append_pdf_oati(
         src = _resolve_image_data(d)
         if src:
             cap = _format_figure_caption(img_idx.get(b.id), str(d.get("imageCaption", "")))
-            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st))
+            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st, **kw))
         story.append(Spacer(1, 0.4 * cm))
         return
     if t == "oati_objective":
@@ -245,7 +411,7 @@ def _append_pdf_oati(
         src = _resolve_image_data(d)
         if src:
             cap = _format_figure_caption(img_idx.get(b.id), str(d.get("imageCaption", "")))
-            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st))
+            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st, **kw))
         story.append(Spacer(1, 0.4 * cm))
         return
     if t == "oati_scope":
@@ -254,7 +420,7 @@ def _append_pdf_oati(
         src = _resolve_image_data(d)
         if src:
             cap = _format_figure_caption(img_idx.get(b.id), str(d.get("imageCaption", "")))
-            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st))
+            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st, **kw))
         story.append(Spacer(1, 0.4 * cm))
         return
     if t == "oati_responsible":
@@ -263,7 +429,7 @@ def _append_pdf_oati(
         src = _resolve_image_data(d)
         if src:
             cap = _format_figure_caption(img_idx.get(b.id), str(d.get("imageCaption", "")))
-            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st))
+            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st, **kw))
         story.append(Spacer(1, 0.4 * cm))
         return
     if t == "oati_definitions":
@@ -272,7 +438,7 @@ def _append_pdf_oati(
         src = _resolve_image_data(d)
         if src:
             cap = _format_figure_caption(img_idx.get(b.id), str(d.get("imageCaption", "")))
-            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st))
+            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st, **kw))
         story.append(Spacer(1, 0.4 * cm))
         return
     if t == "oati_step":
@@ -283,7 +449,7 @@ def _append_pdf_oati(
         src = _resolve_image_data(d)
         if src:
             cap = _format_figure_caption(img_idx.get(b.id), str(d.get("imageCaption", "")))
-            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st))
+            story.extend(_reportlab_figure_bits(src, cap, _image_scale_pct(d), cap_st, **kw))
         story.append(Spacer(1, 0.3 * cm))
         return
     if t == "oati_note":
@@ -359,6 +525,11 @@ def _manual_to_pdf_reportlab(manual: Manual) -> bytes:
         ),
     }
 
+    rl_figure_layout = {
+        "usable_width_pts": float(doc.width),
+        "max_height_pts": max(144.0, float(doc.height) - 72.0),
+    }
+
     story: list = []
     ordered = sorted(manual.blocks, key=lambda x: x.order)
     d_cover: dict = {}
@@ -373,7 +544,7 @@ def _manual_to_pdf_reportlab(manual: Manual) -> bytes:
     elif any(b.type == "oati_cover" for b in manual.blocks):
         img_idx = oati_image_index_by_block_id(manual)
         for b in ordered:
-            _append_pdf_oati(story, styles_map, b, img_idx)
+            _append_pdf_oati(story, styles_map, b, img_idx, rl_figure_layout)
 
         def _on_first(_canv, _doc) -> None:
             return
@@ -393,17 +564,165 @@ def _manual_to_pdf_reportlab(manual: Manual) -> bytes:
     return buf.getvalue()
 
 
-def manual_to_pdf(manual: Manual) -> bytes:
+def _manual_to_pdf_quick_guide_reportlab(manual: Manual) -> bytes:
+    """Respaldo Windows/sin WeasyPrint: exporta contenido de qg_page con ReportLab (horizontal)."""
+    from reportlab.lib.pagesizes import landscape
+
+    buf = BytesIO()
+    page_size = landscape(A4)
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=page_size,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+    )
+    base = getSampleStyleSheet()
+    normal = ParagraphStyle(
+        name="QgNormal",
+        parent=base["Normal"],
+        fontSize=10,
+        leading=13,
+    )
+    h1 = ParagraphStyle(
+        name="QgH1",
+        parent=base["Heading1"],
+        fontSize=14,
+        textColor=colors.HexColor("#00668c"),
+        spaceAfter=8,
+    )
+    h2 = ParagraphStyle(
+        name="QgH2",
+        parent=base["Heading2"],
+        fontSize=11,
+        textColor=colors.HexColor("#1e293b"),
+        spaceAfter=6,
+    )
+    note = ParagraphStyle(
+        name="QgNote",
+        parent=base["Normal"],
+        fontSize=9,
+        textColor=colors.HexColor("#64748b"),
+    )
+    # ReportLab distribuye todo en una sola columna fluida; el alto disponible tras títulos y márgenes
+    # puede ser menor que doc.height — reservamos ~1″ para texto alrededor de cada captura.
+    qg_img_max_h = max(144.0, min(float(doc.height) - 72.0, _RL_DEFAULT_IMG_MAX_HEIGHT_PT))
+    qg_fig_kw = {"usable_width_pts": float(doc.width), "max_height_pts": qg_img_max_h}
+
+    story: list = []
+    pages = sorted([b for b in manual.blocks if is_qg_page_block(b)], key=lambda x: x.order)
+    if not pages:
+        story.append(Paragraph(escape("Sin páginas en la guía rápida."), normal))
+        doc.build(story)
+        return buf.getvalue()
+
+    def _col_sort_key(ii: tuple[int, object]) -> tuple[int, int]:
+        i, c = ii
+        if not isinstance(c, dict):
+            return (0, i)
+        z = c.get("zIndex")
+        if z is None:
+            z = c.get("z_index")
+        if z is None:
+            z = i
+        try:
+            return (int(z), i)
+        except (TypeError, ValueError):
+            return (0, i)
+
+    for pi, pb in enumerate(pages):
+        if pi:
+            story.append(PageBreak())
+        data = dict(pb.data)
+        ht = str(data.get("headerTitle") or "Guía rápida").strip()
+        story.append(Paragraph(escape(ht), h1))
+        story.append(Spacer(1, 0.2 * cm))
+        cols_raw = list(data.get("columns") or [])
+        for _, col in sorted(enumerate(cols_raw), key=_col_sort_key):
+            if not isinstance(col, dict):
+                continue
+            comp = col.get("component")
+            if not isinstance(comp, dict):
+                continue
+            kind = str(comp.get("kind") or "").lower()
+            if kind == "glossary":
+                story.append(Paragraph(escape("Glosario"), h2))
+                for e in comp.get("entries") or []:
+                    if not isinstance(e, dict):
+                        continue
+                    term = str(e.get("term") or "").strip()
+                    defin = str(e.get("definition") or e.get("text") or "").strip()
+                    if not term and not defin:
+                        continue
+                    line = f"<b>{escape(term)}</b>" + (f": {escape(defin)}" if defin else "")
+                    story.append(Paragraph(line.replace("\n", "<br/>"), normal))
+                story.append(Spacer(1, 0.25 * cm))
+            elif kind == "step":
+                title = str(comp.get("title") or "Paso").strip()
+                story.append(Paragraph(escape(title), h2))
+                for m in comp.get("miniSteps") or comp.get("mini_steps") or []:
+                    if not isinstance(m, dict):
+                        continue
+                    txt = str(m.get("text") or "").strip()
+                    if txt:
+                        story.extend(_paragraph_lines(txt, normal))
+                    for key in ("imageData", "image_data", "imageData2", "image_data2"):
+                        src = str(m.get(key) or "").strip()
+                        if src:
+                            story.extend(_reportlab_figure_bits(src, "", 100, note, **qg_fig_kw))
+                story.append(Spacer(1, 0.25 * cm))
+            elif kind == "comment":
+                txt = str(comp.get("text") or "").strip()
+                if txt:
+                    body = escape(soft_wrap_long_tokens(txt)).replace("\n", "<br/>")
+                    story.append(Paragraph(f"<i>Nota: {body}</i>", normal))
+                img = str(comp.get("imageData") or comp.get("image_data") or "").strip()
+                if img:
+                    story.extend(_reportlab_figure_bits(img, "", 90, note, **qg_fig_kw))
+                story.append(Spacer(1, 0.25 * cm))
+        story.append(Spacer(1, 0.15 * cm))
+        story.append(Paragraph(escape(f"Página {pi + 1} de {len(pages)}"), note))
+    doc.build(story)
+    return buf.getvalue()
+
+
+def manual_to_pdf(manual: Manual) -> PdfBuildResult:
+    if is_quick_guide_manual(manual):
+        html, base = _manual_to_html_pdf_inputs(manual)
+        try:
+            from weasyprint import HTML  # type: ignore[import-not-found]
+
+            pdf = HTML(string=html, base_url=base).write_pdf()
+            return PdfBuildResult(content=pdf, engine="weasyprint", styled=True)
+        except Exception as e_wp:
+            logger.warning(
+                "Guía rápida: WeasyPrint no disponible o falló; intentando navegador (Playwright/Chromium).",
+                exc_info=e_wp,
+            )
+            pw_out = _try_quick_guide_playwright(html, base)
+            if pw_out is not None:
+                pdf_body, pw_engine = pw_out
+                return PdfBuildResult(content=pdf_body, engine=pw_engine, styled=True)
+            logger.warning(
+                "Guía rápida: usando respaldo ReportLab (texto plano, sin CSS ni posiciones de módulos)."
+            )
+            return PdfBuildResult(
+                content=_manual_to_pdf_quick_guide_reportlab(manual),
+                engine="reportlab_quick_guide_plain",
+                styled=False,
+            )
+
+    html, base = _manual_to_html_pdf_inputs(manual)
     try:
-        from app.application.services.document_html import blocks_to_html  # noqa: PLC0415
-
-        from app.config import get_settings  # noqa: PLC0415
-
-        settings = get_settings()
-        base = settings.asset_origin.rstrip("/") + "/"
-        html = blocks_to_html(manual, asset_base_url=base)
         from weasyprint import HTML  # type: ignore[import-not-found]
 
-        return HTML(string=html, base_url=base).write_pdf()
-    except Exception:
-        return _manual_to_pdf_reportlab(manual)
+        pdf = HTML(string=html, base_url=base).write_pdf()
+        return PdfBuildResult(content=pdf, engine="weasyprint", styled=True)
+    except Exception as e:
+        logger.warning("WeasyPrint falló para el manual OATI; usando ReportLab.", exc_info=e)
+        return PdfBuildResult(
+            content=_manual_to_pdf_reportlab(manual),
+            engine="reportlab_oati_fallback",
+            styled=False,
+        )

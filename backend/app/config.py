@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Origen para resolver imágenes relativas / descargas cuando no hay Request (p.ej. PDF en servidor).
     asset_origin: str = "http://127.0.0.1:8000"
 
+    # Si WeasyPrint falla en guías rápidas: orden por defecto Chrome → Edge Playwright env PLAYWRIGHT_PDF_CHANNEL (= chrome | msedge | chromium).
+    playwright_pdf_channel: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

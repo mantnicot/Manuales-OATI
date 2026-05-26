@@ -45,6 +45,11 @@ export const ManualEditorStore = signalStore(
         if (!m) return;
         patchState(store, { manual: { ...m, ...fields }, dirty: true });
       },
+      mergeMeta(extra: Record<string, unknown>) {
+        const m = store.manual();
+        if (!m) return;
+        patchState(store, { manual: { ...m, meta: { ...m.meta, ...extra } }, dirty: true });
+      },
       markClean() {
         patchState(store, { dirty: false });
       },

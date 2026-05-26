@@ -30,6 +30,7 @@ export class ManualApiService {
     title: string;
     code: string;
     use_official_template?: boolean;
+    document_kind?: string | null;
     system_id?: string | null;
     folder_id?: string | null;
   }): Observable<Manual> {
@@ -52,6 +53,12 @@ export class ManualApiService {
 
   pdfFileUrl(id: string): string {
     return `${this.base}/manuals/${id}/pdf-file`;
+  }
+
+  /** PDF generado desde el HTML del manual o guía rápida (no confundir con pdf-file de solo-PDF). */
+  exportPdfUrl(id: string, opts?: { inline?: boolean }): string {
+    const q = opts?.inline ? '?inline=1' : '';
+    return `${this.base}/manuals/${id}/export.pdf${q}`;
   }
 
   update(

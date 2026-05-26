@@ -6,6 +6,7 @@ from uuid import UUID
 from app.domain.entities.manual import Manual, ManualStatus
 from app.domain.ports.repositories import ManualRepository
 from app.application.services.oati_template import default_oati_blocks
+from app.application.services.quick_guide_template import default_quick_guide_blocks
 
 
 class CreateManual:
@@ -20,7 +21,18 @@ class CreateManual:
         use_official_template: bool = True,
         system_id: UUID | None = None,
         folder_id: UUID | None = None,
+        document_kind: str | None = None,
     ) -> Manual:
+        dk = (document_kind or "").strip().lower()
+        if dk == "quick_guide":
+            manual = Manual.create_empty(title=title, code=code, template_id="quick-guide-v1")
+            manual.system_id = system_id
+            manual.folder_id = folder_id
+            manual.meta["document_kind"] = "quick_guide"
+            manual.meta["structure"] = ["paginas"]
+            manual.blocks = default_quick_guide_blocks()
+            return await self._manuals.save(manual)
+
         manual = Manual.create_empty(
             title=title,
             code=code,

@@ -24,9 +24,10 @@ import { catchError, filter, mergeMap } from 'rxjs/operators';
 
 import { ConfirmDialogComponent } from './confirm-dialog.component';
 import { QuickNameDialogComponent } from './quick-name-dialog.component';
-import { isPdfStorageManual, Manual } from '../../core/models/manual.models';
+import { isPdfStorageManual, isQuickGuideManual, Manual } from '../../core/models/manual.models';
 import { LibraryApiService, LibraryFolder, LibrarySystem } from '../../core/services/library-api.service';
 import { ManualApiService } from '../../core/services/manual-api.service';
+import { PdfBrowserService } from '../../core/services/pdf-browser.service';
 
 @Component({
   selector: 'app-manual-list',
@@ -52,6 +53,7 @@ import { ManualApiService } from '../../core/services/manual-api.service';
 })
 export class ManualListComponent {
   private readonly api = inject(ManualApiService);
+  private readonly pdfBrowser = inject(PdfBrowserService);
   private readonly library = inject(LibraryApiService);
   private readonly router = inject(Router);
   private readonly dialog = inject(MatDialog);
@@ -60,6 +62,12 @@ export class ManualListComponent {
   @ViewChild('pdfFileInput') pdfFileInput?: ElementRef<HTMLInputElement>;
 
   readonly isPdfManual = isPdfStorageManual;
+  readonly isQuickGuide = isQuickGuideManual;
+
+  /** Editor OATI o guía rápida según el tipo de documento. */
+  editorPath(m: Manual): string[] {
+    return this.isQuickGuide(m) ? ['/quick-guide', m.id] : ['/manual', m.id];
+  }
 
   manuals: Manual[] = [];
   systems: LibrarySystem[] = [];
@@ -179,6 +187,34 @@ export class ManualListComponent {
     });
   }
 
+  createQuickGuide(): void {
+    this.busy = true;
+    this.overlayMessage = 'Creando guía rápida…';
+    this.error = null;
+    const code = `GR-${Date.now().toString(36).toUpperCase()}`;
+    this.api
+      .create({
+        title: 'Nueva guía rápida',
+        code,
+        use_official_template: false,
+        document_kind: 'quick_guide',
+      })
+      .subscribe({
+        next: (m) => {
+          this.busy = false;
+          this.overlayMessage = '';
+          this.snack.open('Guía rápida creada. Abriendo editor…', 'Cerrar', { duration: 3000 });
+          void this.router.navigate(['/quick-guide', m.id]);
+        },
+        error: (err) => {
+          this.busy = false;
+          this.overlayMessage = '';
+          this.error = this.httpErrorDetail(err, 'No se pudo crear la guía rápida.');
+          this.snack.open(this.error, 'Cerrar', { duration: 6000 });
+        },
+      });
+  }
+
   createManual(): void {
     this.busy = true;
     this.overlayMessage = 'Creando manual…';
@@ -200,19 +236,20 @@ export class ManualListComponent {
     });
   }
 
-  pdfDownloadUrl(id: string): string {
-    return this.api.pdfFileUrl(id);
+  /** Ojito: HTML en nueva pestaña (manuales/guías) o PDF vía blob (archivos .pdf subidos). */
+  openEyePreview(m: Manual, ev: Event): void {
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (this.isPdfManual(m)) {
+      this.pdfBrowser.openStoredPdfInNewTab(m.id);
+    } else {
+      this.pdfBrowser.openHtmlPreviewInNewTab(m.id);
+    }
   }
 
-  /** Abre el PDF en pestaña nueva (Content-Disposition inline en el servidor). */
-  pdfPreviewUrl(id: string): string {
-    const u = this.api.pdfFileUrl(id);
-    return `${u}?inline=1`;
-  }
-
-  /** HTML de vista previa del servidor (misma base que export PDF/Word). */
-  htmlPreviewUrl(id: string): string {
-    return this.api.previewUrl(id);
+  pdfDownloadUrl(m: Manual): string {
+    if (isPdfStorageManual(m)) return this.api.pdfFileUrl(m.id);
+    return this.api.exportPdfUrl(m.id);
   }
 
   pickPdfFile(): void {

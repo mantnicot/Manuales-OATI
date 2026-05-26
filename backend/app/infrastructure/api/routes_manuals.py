@@ -72,6 +72,7 @@ class ManualCreateDTO(BaseModel):
     use_official_template: bool = True
     system_id: UUID | None = None
     folder_id: UUID | None = None
+    document_kind: str | None = None
 
 
 class ManualUpdateDTO(BaseModel):
@@ -154,6 +155,7 @@ async def create_manual(body: ManualCreateDTO, repo: Annotated[ManualRepository,
         use_official_template=body.use_official_template,
         system_id=body.system_id,
         folder_id=body.folder_id,
+        document_kind=body.document_kind,
     )
     return _to_response(m)
 
@@ -356,7 +358,7 @@ async def download_pdf_original(
 def _inject_preview_pdf_toolbar(html: str, manual_id: UUID) -> str:
     """Barra fija con descarga PDF (solo pestaña de vista previa guardada)."""
     mid = str(manual_id)
-    pdf_href = f"/api/v1/manuals/{mid}/export.pdf"
+    pdf_href = f"/api/v1/manuals/{mid}/export.pdf?inline=1"
     bar = (
         '<div id="oati-preview-toolbar" style="position:fixed;z-index:2147483647;top:0;left:0;right:0;'
         "background:#0f172a;color:#f8fafc;padding:12px 16px;font-family:system-ui,Segoe UI,sans-serif;"
@@ -415,7 +417,14 @@ async def export_docx(manual_id: UUID, repo: Annotated[ManualRepository, Depends
 
 
 @router.get("/{manual_id}/export.pdf")
-async def export_pdf(manual_id: UUID, repo: Annotated[ManualRepository, Depends(get_manual_repo)]):
+async def export_pdf(
+    manual_id: UUID,
+    repo: Annotated[ManualRepository, Depends(get_manual_repo)],
+    inline: Annotated[
+        bool,
+        Query(description="Si es true, Content-Disposition inline (ver en navegador / iframe)."),
+    ] = False,
+):
     m = await repo.get(manual_id)
     if m is None:
         raise HTTPException(status_code=404, detail="Manual no encontrado")
@@ -425,12 +434,17 @@ async def export_pdf(manual_id: UUID, repo: Annotated[ManualRepository, Depends(
             detail="Este documento es el PDF subido; no se genera otro PDF desde la plantilla OATI.",
         )
     try:
-        data = manual_to_pdf(m)
-    except RuntimeError as e:
-        raise HTTPException(status_code=501, detail=str(e)) from e
+        result = manual_to_pdf(m)
+    except Exception as e:
+        raise HTTPException(status_code=501, detail=f"No se pudo generar el PDF: {e!s}") from e
     filename = f"{m.code}-v{m.current_version}.pdf"
     return Response(
-        content=data,
+        content=result.content,
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{filename}"',
+            "Cache-Control": "no-store, max-age=0",
+            "X-Manuales-Pdf-Engine": result.engine,
+            "X-Manuales-Pdf-Styled": "1" if result.styled else "0",
+        },
     )

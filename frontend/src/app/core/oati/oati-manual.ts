@@ -5,6 +5,7 @@ import {
   OatiBlockType,
   isOatiFlowBlock,
   isOatiStaticBlock,
+  isQuickGuideManual,
 } from '../models/manual.models';
 
 const STATIC_COUNT = OATI_STATIC_TYPES.length;
@@ -103,8 +104,15 @@ export function createDefaultOatiBlocks(): ManualBlock[] {
   return blocks;
 }
 
-/** Garantiza 6 bloques estáticos + deja flujo tal cual venga (o migra legacy). */
+/** Garantiza 6 bloques estáticos + deja flujo tal cual venga (o migra legacy). No altera guías rápidas. */
 export function normalizeManual(manual: Manual): Manual {
+  if (isQuickGuideManual(manual)) {
+    return {
+      ...manual,
+      blocks: manual.blocks.map((b) => ({ ...b, data: { ...b.data } })),
+      meta: { ...manual.meta },
+    };
+  }
   const hasModern = manual.blocks.some((b) => b.type === 'oati_cover');
   if (hasModern) {
     return ensureStaticShape(manual);
@@ -238,6 +246,7 @@ function migrateLegacyToOati(manual: Manual): Manual {
   };
 }
 export function needsOatiV2Migration(manual: Manual): boolean {
+  if (isQuickGuideManual(manual)) return false;
   return !manual.blocks.some((b) => b.type === 'oati_cover');
 }
 

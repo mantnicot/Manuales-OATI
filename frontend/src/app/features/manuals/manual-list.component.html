@@ -28,6 +28,18 @@
       Subir PDF
     </button>
     <button
+      mat-stroked-button
+      color="accent"
+      type="button"
+      (click)="createQuickGuide()"
+      [disabled]="busy"
+      matTooltip="Crea una guía rápida (infografía horizontal, PDF como las referencias OATI)"
+      matTooltipShowDelay="250"
+    >
+      <mat-icon>bolt</mat-icon>
+      Guía rápida
+    </button>
+    <button
       mat-flat-button
       color="accent"
       type="button"
@@ -74,6 +86,7 @@
 
   <p *ngIf="manuals.length || systems.length" class="text-sm text-slate-600 m-0">
     Cree <strong>sistemas</strong> y <strong>carpetas</strong> para agrupar. Arrastre cada manual desde «Sin clasificar» o entre carpetas.
+    Las <strong>guías rápidas</strong> se editan en columna de pasos / glosario y el PDF sale en formato horizontal tipo infografía.
     Los manuales <strong>OATI</strong> pueden <strong>visualizarse</strong> con el ojito (HTML en servidor); en esa pantalla hay un botón para <strong>descargar PDF</strong>.
     El icono de ventana abre el editor. Los archivos <strong>.pdf</strong> subidos usan el ojito para ver y la flecha para descargar.
     Puede <strong>renombrar</strong> con el lápiz y <strong>eliminar</strong> con la papelera.
@@ -110,6 +123,13 @@
             matTooltipShowDelay="250"
             >PDF</span
           >
+            <span
+              *ngIf="!isPdfManual(m) && isQuickGuide(m)"
+              class="text-[10px] font-semibold uppercase text-teal-900 bg-teal-100 px-1 rounded shrink-0"
+              matTooltip="Guía rápida (infografía / PDF horizontal)"
+              matTooltipShowDelay="250"
+              >GR</span
+            >
           <span class="font-medium text-slate-800 max-w-[200px] truncate">{{ m.title }}</span>
           <button
             mat-icon-button
@@ -122,25 +142,22 @@
           >
             <mat-icon class="!text-lg">edit</mat-icon>
           </button>
-          <a
-            *ngIf="!isPdfManual(m)"
+          <button
             mat-icon-button
+            type="button"
             class="!w-8 !h-8"
-            [href]="htmlPreviewUrl(m.id)"
-            target="_blank"
-            rel="noopener noreferrer"
-            (click)="$event.stopPropagation()"
-            aria-label="Vista previa HTML"
-            matTooltip="Ver el manual en otra pestaña (HTML) y descargar PDF"
+            (click)="openEyePreview(m, $event)"
+            aria-label="Vista previa"
+            [matTooltip]="isPdfManual(m) ? 'Abrir el PDF en una pestaña nueva' : 'Ver el manual en otra pestaña (HTML)'"
             matTooltipShowDelay="250"
           >
             <mat-icon class="!text-lg">visibility</mat-icon>
-          </a>
+          </button>
           <a
             *ngIf="!isPdfManual(m)"
             mat-icon-button
             class="!w-8 !h-8"
-            [routerLink]="['/manual', m.id]"
+            [routerLink]="editorPath(m)"
             (click)="$event.stopPropagation()"
             aria-label="Editar"
             matTooltip="Abrir el editor OATI para modificar el manual"
@@ -152,21 +169,7 @@
             *ngIf="isPdfManual(m)"
             mat-icon-button
             class="!w-8 !h-8"
-            [href]="pdfPreviewUrl(m.id)"
-            target="_blank"
-            rel="noopener noreferrer"
-            (click)="$event.stopPropagation()"
-            aria-label="Ver documento en otra pestaña"
-            matTooltip="Abrir el PDF en una pestaña nueva"
-            matTooltipShowDelay="250"
-          >
-            <mat-icon class="!text-lg">visibility</mat-icon>
-          </a>
-          <a
-            *ngIf="isPdfManual(m)"
-            mat-icon-button
-            class="!w-8 !h-8"
-            [href]="pdfDownloadUrl(m.id)"
+            [href]="pdfDownloadUrl(m)"
             (click)="$event.stopPropagation()"
             aria-label="Descargar PDF"
             matTooltip="Descargar el archivo PDF"
@@ -288,6 +291,13 @@
                   matTooltipShowDelay="250"
                   >PDF</span
                 >
+                <span
+                  *ngIf="!isPdfManual(m) && isQuickGuide(m)"
+                  class="text-[10px] font-semibold uppercase text-teal-900 bg-teal-100 px-1 rounded shrink-0"
+                  matTooltip="Guía rápida (infografía / PDF horizontal)"
+                  matTooltipShowDelay="250"
+                  >GR</span
+                >
                 <span class="font-medium text-slate-800 max-w-[180px] truncate">{{ m.title }}</span>
                 <button
                   mat-icon-button
@@ -299,25 +309,22 @@
                 >
                   <mat-icon class="!text-lg">edit</mat-icon>
                 </button>
-                <a
-                  *ngIf="!isPdfManual(m)"
+                <button
                   mat-icon-button
+                  type="button"
                   class="!w-8 !h-8"
-                  [href]="htmlPreviewUrl(m.id)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  (click)="$event.stopPropagation()"
-                  aria-label="Vista previa HTML"
-                  matTooltip="Ver el manual en otra pestaña (HTML) y descargar PDF"
+                  (click)="openEyePreview(m, $event)"
+                  aria-label="Vista previa"
+                  [matTooltip]="isPdfManual(m) ? 'Abrir el PDF en una pestaña nueva' : 'Ver el manual en otra pestaña (HTML)'"
                   matTooltipShowDelay="250"
                 >
                   <mat-icon class="!text-lg">visibility</mat-icon>
-                </a>
+                </button>
                 <a
                   *ngIf="!isPdfManual(m)"
                   mat-icon-button
                   class="!w-8 !h-8"
-                  [routerLink]="['/manual', m.id]"
+                  [routerLink]="editorPath(m)"
                   (click)="$event.stopPropagation()"
                   aria-label="Editar"
                   matTooltip="Abrir el editor OATI para modificar el manual"
@@ -329,21 +336,7 @@
                   *ngIf="isPdfManual(m)"
                   mat-icon-button
                   class="!w-8 !h-8"
-                  [href]="pdfPreviewUrl(m.id)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  (click)="$event.stopPropagation()"
-                  aria-label="Ver documento en otra pestaña"
-                  matTooltip="Abrir el PDF en una pestaña nueva"
-                  matTooltipShowDelay="250"
-                >
-                  <mat-icon class="!text-lg">visibility</mat-icon>
-                </a>
-                <a
-                  *ngIf="isPdfManual(m)"
-                  mat-icon-button
-                  class="!w-8 !h-8"
-                  [href]="pdfDownloadUrl(m.id)"
+                  [href]="pdfDownloadUrl(m)"
                   (click)="$event.stopPropagation()"
                   aria-label="Descargar PDF"
                   matTooltip="Descargar el archivo PDF"
@@ -400,6 +393,13 @@
                   matTooltipShowDelay="250"
                   >PDF</span
                 >
+                <span
+                  *ngIf="!isPdfManual(m) && isQuickGuide(m)"
+                  class="text-[10px] font-semibold uppercase text-teal-900 bg-teal-100 px-1 rounded shrink-0"
+                  matTooltip="Guía rápida (infografía / PDF horizontal)"
+                  matTooltipShowDelay="250"
+                  >GR</span
+                >
                 <span class="font-medium text-slate-800 max-w-[180px] truncate">{{ m.title }}</span>
                 <button
                   mat-icon-button
@@ -411,25 +411,22 @@
                 >
                   <mat-icon class="!text-lg">edit</mat-icon>
                 </button>
-                <a
-                  *ngIf="!isPdfManual(m)"
+                <button
                   mat-icon-button
+                  type="button"
                   class="!w-8 !h-8"
-                  [href]="htmlPreviewUrl(m.id)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  (click)="$event.stopPropagation()"
-                  aria-label="Vista previa HTML"
-                  matTooltip="Ver el manual en otra pestaña (HTML) y descargar PDF"
+                  (click)="openEyePreview(m, $event)"
+                  aria-label="Vista previa"
+                  [matTooltip]="isPdfManual(m) ? 'Abrir el PDF en una pestaña nueva' : 'Ver el manual en otra pestaña (HTML)'"
                   matTooltipShowDelay="250"
                 >
                   <mat-icon class="!text-lg">visibility</mat-icon>
-                </a>
+                </button>
                 <a
                   *ngIf="!isPdfManual(m)"
                   mat-icon-button
                   class="!w-8 !h-8"
-                  [routerLink]="['/manual', m.id]"
+                  [routerLink]="editorPath(m)"
                   (click)="$event.stopPropagation()"
                   aria-label="Editar"
                   matTooltip="Abrir el editor OATI para modificar el manual"
@@ -441,21 +438,7 @@
                   *ngIf="isPdfManual(m)"
                   mat-icon-button
                   class="!w-8 !h-8"
-                  [href]="pdfPreviewUrl(m.id)"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  (click)="$event.stopPropagation()"
-                  aria-label="Ver documento en otra pestaña"
-                  matTooltip="Abrir el PDF en una pestaña nueva"
-                  matTooltipShowDelay="250"
-                >
-                  <mat-icon class="!text-lg">visibility</mat-icon>
-                </a>
-                <a
-                  *ngIf="isPdfManual(m)"
-                  mat-icon-button
-                  class="!w-8 !h-8"
-                  [href]="pdfDownloadUrl(m.id)"
+                  [href]="pdfDownloadUrl(m)"
                   (click)="$event.stopPropagation()"
                   aria-label="Descargar PDF"
                   matTooltip="Descargar el archivo PDF"

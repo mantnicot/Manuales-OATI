@@ -6,5 +6,10 @@ export const routes: Routes = [
     path: 'manual/:id',
     loadComponent: () => import('./features/editor/manual-editor.component').then((m) => m.ManualEditorComponent),
   },
+  {
+    path: 'quick-guide/:id',
+    loadComponent: () =>
+      import('./features/quick-guide/quick-guide-editor.component').then((m) => m.QuickGuideEditorComponent),
+  },
   { path: '**', redirectTo: '' },
 ];

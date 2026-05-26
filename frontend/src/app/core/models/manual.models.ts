@@ -25,7 +25,10 @@ export type LegacyBlockType =
   | 'link'
   | 'footer';
 
-export type BlockType = OatiBlockType | LegacyBlockType;
+/** Página de guía rápida (una hoja PDF landscape por bloque). */
+export type QuickGuideBlockType = 'qg_page';
+
+export type BlockType = OatiBlockType | LegacyBlockType | QuickGuideBlockType;
 
 export interface ManualBlock {
   id: string;
@@ -53,6 +56,12 @@ export interface Manual {
 /** Documento guardado solo como PDF subido (no editable en el constructor OATI). */
 export function isPdfStorageManual(m: Pick<Manual, 'meta'>): boolean {
   return m.meta?.['storage_kind'] === 'pdf';
+}
+
+/** Guía rápida: plantilla simplificada con bloques qg_page. */
+export function isQuickGuideManual(m: Pick<Manual, 'meta' | 'blocks'>): boolean {
+  if (m.meta?.['document_kind'] === 'quick_guide') return true;
+  return (m.blocks ?? []).some((b) => b.type === 'qg_page');
 }
 
 export const OATI_STATIC_TYPES: readonly OatiBlockType[] = [

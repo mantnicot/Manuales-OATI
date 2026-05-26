@@ -1,0 +1,456 @@
+<mat-toolbar color="primary" class="toolbar">
+  <a mat-button routerLink="/">
+    <mat-icon>arrow_back</mat-icon>
+    Biblioteca
+  </a>
+  <span class="spacer"></span>
+  <button
+    mat-stroked-button
+    type="button"
+    *ngIf="store.manual() as m"
+    [disabled]="store.saving()"
+    (click)="saveNow(false)"
+    matTooltip="Guarda sin incrementar versión"
+    matTooltipShowDelay="250"
+  >
+    <mat-icon>save</mat-icon>
+    Guardar
+  </button>
+  <button
+    mat-stroked-button
+    type="button"
+    *ngIf="store.manual() as m"
+    [disabled]="store.saving()"
+    (click)="saveNow(true)"
+    matTooltip="Marca nueva versión del documento"
+    matTooltipShowDelay="250"
+  >
+    <mat-icon>layers</mat-icon>
+    Versión
+  </button>
+  <button
+    mat-stroked-button
+    type="button"
+    *ngIf="store.manual() as m"
+    (click)="openHtmlPreviewInBrowser(m.id)"
+    matTooltip="Abrir vista previa HTML del servidor en una pestaña nueva"
+    matTooltipShowDelay="250"
+  >
+    <mat-icon>open_in_new</mat-icon>
+    HTML
+  </button>
+  <button
+    mat-stroked-button
+    type="button"
+    *ngIf="store.manual() as m"
+    (click)="openPdfInBrowser(m.id)"
+    matTooltip="Abrir el PDF en una pestaña nueva (más fiable que el visor embebido)"
+    matTooltipShowDelay="250"
+  >
+    <mat-icon>picture_as_pdf</mat-icon>
+    PDF
+  </button>
+</mat-toolbar>
+
+<div class="wrap" *ngIf="store.manual() as m">
+  <header class="qg-doc-header">
+    <div class="qg-doc-header-text">
+      <h1 class="qg-doc-title">{{ m.title }}</h1>
+      <p class="qg-doc-meta">
+        <span class="qg-doc-code">Código: {{ m.code }}</span>
+        <span class="qg-doc-ver" *ngIf="m.current_version">Versión {{ m.current_version }}</span>
+      </p>
+    </div>
+    <div class="qg-page-rail">
+      <span class="rail-label">Páginas</span>
+      <div class="page-chip-list">
+        <button
+          type="button"
+          class="page-chip"
+          *ngFor="let p of pageBlocks(); let i = index"
+          [class.active]="selectedPageIdx() === i"
+          (click)="onSelectPageTab(i)"
+        >
+          <span class="page-chip-num">{{ i + 1 }}</span>
+          <span class="page-chip-title">{{ p.data['headerTitle'] || 'Sin título' }}</span>
+        </button>
+      </div>
+      <div class="rail-actions">
+        <button mat-stroked-button type="button" (click)="addPage('glossary')" matTooltip="Nueva página glosario">
+          <mat-icon>menu_book</mat-icon>
+          Glosario
+        </button>
+        <button mat-stroked-button type="button" (click)="addPage('guide')" matTooltip="Nueva página pasos">
+          <mat-icon>view_column</mat-icon>
+          Guía
+        </button>
+        <button
+          mat-icon-button
+          type="button"
+          *ngIf="selectedPage() as pg"
+          (click)="movePage(selectedPageIdx(), -1)"
+          matTooltip="Subir página"
+        >
+          <mat-icon>keyboard_arrow_up</mat-icon>
+        </button>
+        <button
+          mat-icon-button
+          type="button"
+          *ngIf="selectedPage() as pg"
+          (click)="movePage(selectedPageIdx(), 1)"
+          matTooltip="Bajar página"
+        >
+          <mat-icon>keyboard_arrow_down</mat-icon>
+        </button>
+        <button mat-icon-button type="button" color="warn" (click)="removePage(selectedPageIdx())" matTooltip="Eliminar página">
+          <mat-icon>delete</mat-icon>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="meta-row">
+    <mat-form-field appearance="outline" class="flex1">
+      <mat-label>Título del documento</mat-label>
+      <input matInput [(ngModel)]="m.title" (ngModelChange)="patchTitleCode(m.title, m.code)" />
+    </mat-form-field>
+    <mat-form-field appearance="outline" class="code-field">
+      <mat-label>Código</mat-label>
+      <input matInput [(ngModel)]="m.code" (ngModelChange)="patchTitleCode(m.title, m.code)" />
+    </mat-form-field>
+  </div>
+
+  <ng-container *ngIf="selectedPage() as page">
+    <div class="workspace">
+      <aside class="form-column">
+        <mat-card class="form-card">
+          <div class="panel-head">
+            <h2 class="panel-title">Contenido y módulos</h2>
+            <p class="panel-sub">Página: <strong>{{ page.data['headerTitle'] || 'Sin título' }}</strong></p>
+          </div>
+
+          <div class="page-tools">
+            <mat-form-field appearance="outline" class="hdr-title">
+              <mat-label>Título en cabecera (PDF)</mat-label>
+              <input
+                matInput
+                [ngModel]="page.data['headerTitle']"
+                (ngModelChange)="patchPageData(selectedPageIdx(), { headerTitle: $event })"
+              />
+            </mat-form-field>
+            <mat-form-field appearance="outline" class="theme-field">
+              <mat-label>Tema de fondo</mat-label>
+              <mat-select
+                [ngModel]="page.data['theme']"
+                (ngModelChange)="patchPageData(selectedPageIdx(), { theme: $event })"
+              >
+                <mat-option value="glossary">Glosario (franjas grises)</mat-option>
+                <mat-option value="guide">Pasos (rosado / lavanda)</mat-option>
+              </mat-select>
+            </mat-form-field>
+            <button mat-flat-button color="primary" type="button" (click)="addModule(selectedPageIdx())">
+              <mat-icon>add</mat-icon>
+              Módulo
+            </button>
+          </div>
+
+          <section class="module-editor" *ngIf="selectedPlacedIdx() >= 0">
+            <div class="module-editor-head">
+              <div>
+                <span class="module-label">Módulo {{ selectedPlacedIdx() + 1 }}</span>
+                <span class="module-kind-chip">{{ placedKindLabel(selectedPlacedIdx()) }}</span>
+              </div>
+              <span class="grow"></span>
+              <button mat-stroked-button color="warn" type="button" (click)="removeColumn(selectedPageIdx(), selectedPlacedIdx())">
+                <mat-icon>delete</mat-icon>
+                Quitar
+              </button>
+            </div>
+            <div class="pos-row">
+              <mat-form-field appearance="outline" class="numf">
+                <mat-label>Ancho %</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  min="8"
+                  max="100"
+                  [ngModel]="placementField(selectedPageIdx(), selectedPlacedIdx(), 'widthPct')"
+                  (ngModelChange)="patchPlacement(selectedPageIdx(), selectedPlacedIdx(), { widthPct: +$event })"
+                />
+              </mat-form-field>
+              <mat-form-field appearance="outline" class="numf">
+                <mat-label>Izquierda %</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  min="0"
+                  max="100"
+                  [ngModel]="placementField(selectedPageIdx(), selectedPlacedIdx(), 'xPct')"
+                  (ngModelChange)="patchPlacement(selectedPageIdx(), selectedPlacedIdx(), { xPct: +$event })"
+                />
+              </mat-form-field>
+              <mat-form-field appearance="outline" class="numf">
+                <mat-label>Arriba %</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  min="0"
+                  max="100"
+                  [ngModel]="placementField(selectedPageIdx(), selectedPlacedIdx(), 'yPct')"
+                  (ngModelChange)="patchPlacement(selectedPageIdx(), selectedPlacedIdx(), { yPct: +$event })"
+                />
+              </mat-form-field>
+              <mat-form-field appearance="outline" class="numf numf-wide">
+                <mat-label>Alto %</mat-label>
+                <input
+                  matInput
+                  type="number"
+                  min="10"
+                  max="92"
+                  [ngModel]="placementField(selectedPageIdx(), selectedPlacedIdx(), 'heightPct')"
+                  (ngModelChange)="patchPlacement(selectedPageIdx(), selectedPlacedIdx(), { heightPct: +$event })"
+                />
+              </mat-form-field>
+            </div>
+            <mat-form-field appearance="outline" class="full">
+              <mat-label>Tipo de componente</mat-label>
+              <mat-select
+                [ngModel]="activeComponentKind()"
+                (ngModelChange)="setComponentKind(selectedPageIdx(), selectedPlacedIdx(), $any($event))"
+              >
+                <mat-option value="glossary">Glosario</mat-option>
+                <mat-option value="step">Paso</mat-option>
+                <mat-option value="comment">Comentario</mat-option>
+              </mat-select>
+            </mat-form-field>
+
+            <ng-container *ngIf="activeComponentKind() === 'glossary'">
+              <p class="hint">Término y definición para el panel del PDF.</p>
+              <div
+                class="entry"
+                *ngFor="
+                  let e of glossaryEntries(selectedPageIdx(), selectedPlacedIdx());
+                  let ei = index;
+                  trackBy: trackByGlossaryIdx
+                "
+              >
+                <mat-form-field appearance="outline" class="flex1">
+                  <mat-label>Término</mat-label>
+                  <input
+                    matInput
+                    [ngModel]="e.term"
+                    (ngModelChange)="updateGlossaryEntry(selectedPageIdx(), selectedPlacedIdx(), ei, 'term', $event)"
+                  />
+                </mat-form-field>
+                <mat-form-field appearance="outline" class="flex2">
+                  <mat-label>Definición</mat-label>
+                  <textarea
+                    matInput
+                    rows="2"
+                    [ngModel]="e.definition"
+                    (ngModelChange)="updateGlossaryEntry(selectedPageIdx(), selectedPlacedIdx(), ei, 'definition', $event)"
+                  ></textarea>
+                </mat-form-field>
+                <button mat-icon-button type="button" (click)="removeGlossaryEntry(selectedPageIdx(), selectedPlacedIdx(), ei)">
+                  <mat-icon>remove</mat-icon>
+                </button>
+              </div>
+              <button mat-stroked-button type="button" (click)="addGlossaryEntry(selectedPageIdx(), selectedPlacedIdx())">
+                <mat-icon>add</mat-icon>
+                Término
+              </button>
+            </ng-container>
+
+            <ng-container *ngIf="activeComponentKind() === 'step'">
+              <mat-form-field appearance="outline" class="full">
+                <mat-label>Título del paso</mat-label>
+                <input
+                  matInput
+                  [ngModel]="componentField('title')"
+                  (ngModelChange)="patchColumn(selectedPageIdx(), selectedPlacedIdx(), { component: { title: $event } })"
+                />
+              </mat-form-field>
+              <p class="file-note muted">
+                Tras elegir archivo, debe aparecer <strong>Imagen cargada</strong> / el nombre o el botón <strong>Quitar</strong>. Si el navegador sigue diciendo «Ningún archivo
+                seleccionado», la imagen se guarda igual dentro del documento.
+              </p>
+              <div
+                class="mini"
+                *ngFor="
+                  let ms of miniSteps(selectedPageIdx(), selectedPlacedIdx());
+                  let mi = index;
+                  trackBy: trackByMiniIdx
+                "
+              >
+                <mat-form-field appearance="outline" class="full">
+                  <mat-label>Mini paso {{ mi + 1 }}</mat-label>
+                  <textarea
+                    matInput
+                    rows="2"
+                    [value]="ms.text"
+                    (input)="updateMiniStepText(selectedPageIdx(), selectedPlacedIdx(), mi, ($any($event.target).value ?? '').toString())"
+                  ></textarea>
+                </mat-form-field>
+                <div class="img-row">
+                  <div class="file-field">
+                    <span class="img-lbl">Imagen 1</span>
+                    <input type="file" accept="image/*" (change)="onStepImage($event, selectedPageIdx(), selectedPlacedIdx(), mi, 1)" />
+                    <span class="file-hint muted" *ngIf="ms.imageData && !ms.imageFileName">Imagen cargada</span>
+                    <span class="file-name" *ngIf="ms.imageFileName">{{ ms.imageFileName }}</span>
+                    <button mat-button type="button" *ngIf="ms.imageData" (click)="clearMiniImage(selectedPageIdx(), selectedPlacedIdx(), mi, 1)">Quitar</button>
+                  </div>
+                  <div class="file-field">
+                    <span class="img-lbl">Imagen 2</span>
+                    <input type="file" accept="image/*" (change)="onStepImage($event, selectedPageIdx(), selectedPlacedIdx(), mi, 2)" />
+                    <span class="file-hint muted" *ngIf="ms.imageData2 && !ms.imageFileName2">Imagen cargada</span>
+                    <span class="file-name" *ngIf="ms.imageFileName2">{{ ms.imageFileName2 }}</span>
+                    <button mat-button type="button" *ngIf="ms.imageData2" (click)="clearMiniImage(selectedPageIdx(), selectedPlacedIdx(), mi, 2)">Quitar</button>
+                  </div>
+                </div>
+              </div>
+              <button mat-stroked-button type="button" (click)="addMiniStepRow(selectedPageIdx(), selectedPlacedIdx())">
+                <mat-icon>add</mat-icon>
+                Mini paso
+              </button>
+            </ng-container>
+
+            <ng-container *ngIf="activeComponentKind() === 'comment'">
+              <mat-form-field appearance="outline" class="full">
+                <mat-label>Texto del comentario</mat-label>
+                <textarea
+                  matInput
+                  rows="3"
+                  [ngModel]="componentField('text')"
+                  (ngModelChange)="patchColumn(selectedPageIdx(), selectedPlacedIdx(), { component: { text: $event } })"
+                ></textarea>
+              </mat-form-field>
+              <div class="img-row">
+                <div class="file-field">
+                  <span class="img-lbl">Imagen opcional</span>
+                  <input type="file" accept="image/*" (change)="onCommentImage($event, selectedPageIdx(), selectedPlacedIdx())" />
+                  <span class="file-name" *ngIf="componentField('imageFileName')">{{ componentField('imageFileName') }}</span>
+                  <button
+                    mat-button
+                    type="button"
+                    *ngIf="componentField('imageData')"
+                    (click)="patchColumn(selectedPageIdx(), selectedPlacedIdx(), { component: { imageData: '', imageFileName: '' } })"
+                  >
+                    Quitar imagen
+                  </button>
+                </div>
+              </div>
+            </ng-container>
+          </section>
+
+          <p *ngIf="selectedPlacedIdx() < 0" class="select-prompt">
+            Seleccione un módulo en el <strong>lienzo de edición</strong> (panel derecho, sección desplegable) para editar su contenido.
+          </p>
+        </mat-card>
+      </aside>
+
+      <div class="preview-column">
+        <mat-card class="preview-card">
+          <div class="panel-head preview-panel-head">
+            <h2 class="panel-title">Vista previa final</h2>
+            <span class="preview-hint preview-hint--primary">
+              Coincide con el HTML del servidor y con el PDF (mismo motor de maquetación). Use «HTML» o «PDF» en la barra para comprobarlo.
+            </span>
+          </div>
+
+          <div class="server-preview-wrap">
+            @if (previewIframeSrc(); as prevSrc) {
+              <iframe
+                class="server-preview-iframe"
+                sandbox="allow-same-origin allow-scripts allow-popups"
+                [src]="prevSrc"
+                title="Vista previa — mismo resultado que PDF y HTML exportado"
+              ></iframe>
+            } @else {
+              <p class="server-muted server-preview-placeholder">Cargando vista previa…</p>
+            }
+          </div>
+
+          <details class="lienzo-wrap">
+            <summary>Lienzo de edición — posición y tamaño de módulos</summary>
+            <p class="lienzo-hint">
+              Solo para <strong>arrastrar</strong> (⋮⋮) y <strong>redimensionar</strong> (esquina). El documento tal cual se exporta es la vista
+              previa superior.
+            </p>
+
+            <div class="sheet-stage">
+              <div
+                class="sheet-head-strip"
+                [class.sheet-strip-glossary]="page.data['theme'] === 'glossary'"
+                [class.sheet-strip-guide]="page.data['theme'] === 'guide'"
+              >
+                <span class="brand-mini">Universidad Distrital Francisco José de Caldas</span>
+                <span class="title-mini">{{ page.data['headerTitle'] || '—' }}</span>
+              </div>
+              <div
+                class="sheet-body-preview"
+                [class.sheet-glossary]="page.data['theme'] === 'glossary'"
+                [class.sheet-guide]="page.data['theme'] === 'guide'"
+                (click)="clearPlacedSelection()"
+              >
+                <div
+                  *ngFor="let col of $any(page.data['columns']); let ci = index"
+                  class="placed-module"
+                  [class.active]="selectedPlacedIdx() === ci"
+                  [style.left.%]="displayPlacement(selectedPageIdx(), ci).x"
+                  [style.top.%]="displayPlacement(selectedPageIdx(), ci).y"
+                  [style.width.%]="displayPlacement(selectedPageIdx(), ci).w"
+                  [style.height.%]="displayPlacement(selectedPageIdx(), ci).h"
+                  [style.z-index]="displayPlacement(selectedPageIdx(), ci).z"
+                  (click)="$event.stopPropagation(); selectPlaced(ci)"
+                >
+                  @let pmThumb = thumbForPlaced(ci);
+                  <div
+                    class="pm-handle"
+                    title="Arrastrar"
+                    (pointerdown)="beginDrag($event, selectedPageIdx(), ci)"
+                  >
+                    <mat-icon>drag_indicator</mat-icon>
+                  </div>
+                  <div class="pm-body" [class.pm-body-has-media]="pmThumb !== null">
+                    <div class="pm-stack">
+                      <span class="pm-kind">{{ placedKindLabel(ci) }}</span>
+                      @let gloss = glossaryPreviewForPlaced(ci);
+                      @if (gloss.length) {
+                        <ul class="pm-gloss-list">
+                          @for (g of gloss; track $index) {
+                            <li>
+                              <span class="pm-gloss-term">{{ g.term }}</span>
+                              @if (g.definition) {
+                                <span class="pm-gloss-def"> — {{ g.definition }}</span>
+                              }
+                            </li>
+                          }
+                        </ul>
+                      } @else {
+                        <span class="pm-text">{{ placedSummary(ci) }}</span>
+                      }
+                      @if (pmThumb) {
+                        <div class="pm-thumb-wrap">
+                          <img class="pm-thumb" [src]="pmThumb" alt="" />
+                        </div>
+                      }
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="resize-se"
+                    title="Arrastrar para redimensionar"
+                    aria-label="Redimensionar módulo"
+                    (pointerdown)="beginResize($event, selectedPageIdx(), ci)"
+                  ></button>
+                </div>
+              </div>
+            </div>
+          </details>
+        </mat-card>
+      </div>
+    </div>
+  </ng-container>
+
+  <p class="error" *ngIf="store.error()">{{ store.error() }}</p>
+</div>

@@ -33,7 +33,7 @@ import {
 } from 'rxjs';
 
 import { manualToPreviewHtml } from '../../core/preview/document-preview';
-import { Manual, ManualBlock, OatiBlockType, isPdfStorageManual } from '../../core/models/manual.models';
+import { Manual, ManualBlock, OatiBlockType, isPdfStorageManual, isQuickGuideManual } from '../../core/models/manual.models';
 import { ManualApiService } from '../../core/services/manual-api.service';
 import {
   extractFlowBlocks,
@@ -125,6 +125,10 @@ export class ManualEditorComponent {
             { duration: 7000 },
           );
           void this.router.navigate(['/']);
+          return;
+        }
+        if (isQuickGuideManual(m)) {
+          void this.router.navigate(['/quick-guide', id], { replaceUrl: true });
           return;
         }
         this.afterManualReady();
