@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -66,6 +70,147 @@ def _qg_inject_base_href(html_doc: str, base_href: str) -> str:
     normalized = stripped.rstrip("/") + "/" if stripped else "/"
     tag = "<base href=" + quoteattr(normalized) + ">"
     return html_doc[:insert_at] + tag + html_doc[insert_at:]
+
+
+def _quick_guide_browser_cli_candidates() -> list[tuple[str, str]]:
+    """Rutas comunes a Edge/Chrome para ``--print-to-pdf`` (sin Playwright ni descarga de Chromium)."""
+
+    cand: list[tuple[str, str]] = []
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA", "")
+        win_paths: list[tuple[Path, str]] = [
+            (Path(local) / r"Microsoft\Edge\Application\msedge.exe", "edge_cli"),
+            (Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"), "edge_cli"),
+            (Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"), "edge_cli"),
+            (Path(local) / r"Google\Chrome\Application\chrome.exe", "chrome_cli"),
+            (Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"), "chrome_cli"),
+        ]
+        for p, label in win_paths:
+            if p.is_file():
+                cand.append((str(p), label))
+    else:
+        for name, label in (
+            ("google-chrome-stable", "chrome_cli"),
+            ("google-chrome", "chrome_cli"),
+            ("chromium", "chromium_cli"),
+            ("chromium-browser", "chromium_cli"),
+        ):
+            w = shutil.which(name)
+            if w:
+                cand.append((w, label))
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for exe, lab in cand:
+        if exe not in seen:
+            seen.add(exe)
+            out.append((exe, lab))
+    return out
+
+
+def _try_quick_guide_headless_cli_pdf(html: str, base_href: str) -> tuple[bytes, str] | None:
+    """PDF desde el mismo HTML/CSS usando Chrome o Edge instalados (Chromium ``--print-to-pdf``).
+
+    No usa el paquete Playwright ni descarga binarios; suele ser la vía que mejor replica el
+    diseño en Windows cuando WeasyPrint no está disponible.
+    """
+
+    candidates = _quick_guide_browser_cli_candidates()
+    if not candidates:
+        return None
+
+    merged = _qg_inject_base_href(html, base_href)
+    tmp_html: Path | None = None
+    tmp_pdf: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            suffix=".html",
+            delete=False,
+            prefix="manuales-qg-cli-",
+        ) as fh:
+            fh.write(merged)
+            tmp_html = Path(fh.name)
+        uri = tmp_html.resolve().as_uri()
+
+        fd, pdf_name = tempfile.mkstemp(suffix=".pdf", prefix="manuales-qg-cli-")
+        os.close(fd)
+        tmp_pdf = Path(pdf_name)
+
+        run_kw: dict[str, object] = {"capture_output": True, "timeout": 120}
+        if sys.platform == "win32":
+            cf = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if cf:
+                run_kw["creationflags"] = cf
+
+        last_stderr: bytes | None = None
+        for exe, engine_label in candidates:
+            for head_flag in ("--headless=new", "--headless"):
+                tmp_pdf.unlink(missing_ok=True)
+                pdf_path = tmp_pdf.resolve()
+                cmd = [
+                    exe,
+                    head_flag,
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-extensions",
+                    "--no-pdf-header-footer",
+                    "--allow-file-access-from-files",
+                    "--virtual-time-budget=12000",
+                    f"--print-to-pdf={pdf_path}",
+                    uri,
+                ]
+                proc = subprocess.run(cmd, **run_kw)
+                last_stderr = proc.stderr if isinstance(proc.stderr, bytes) else None
+                if proc.returncode != 0:
+                    logger.info(
+                        "PDF CLI %s %s rc=%s: %s",
+                        exe,
+                        head_flag,
+                        proc.returncode,
+                        (proc.stderr or b"")[:400].decode("utf-8", "replace"),
+                    )
+                    continue
+                try:
+                    data = pdf_path.read_bytes()
+                except OSError:
+                    continue
+                if len(data) < 400 or not data.startswith(b"%PDF"):
+                    logger.info(
+                        "PDF CLI %s no produjo PDF válido (%s bytes); siguiente.",
+                        exe,
+                        len(data),
+                    )
+                    continue
+
+                logger.info("PDF guía rápida generado vía navegador CLI (%s)", engine_label)
+                return (data, engine_label)
+
+        if last_stderr:
+            logger.info(
+                "Último intento PDF CLI stderr: %s",
+                last_stderr[:800].decode("utf-8", "replace"),
+            )
+        return None
+    except subprocess.TimeoutExpired:
+        logger.warning("PDF headless CLI: tiempo de espera agotado.")
+        return None
+    except Exception as e:
+        logger.warning("PDF headless CLI falló.", exc_info=e)
+        return None
+    finally:
+        if tmp_html is not None:
+            try:
+                tmp_html.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if tmp_pdf is not None:
+            try:
+                tmp_pdf.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def _try_quick_guide_playwright(html: str, base_href: str) -> tuple[bytes, str] | None:
@@ -135,8 +280,20 @@ def _try_quick_guide_playwright(html: str, base_href: str) -> tuple[bytes, str] 
                     try:
                         page = browser.new_page()
                         page.set_default_navigation_timeout(120_000)
+                        # Ancho similar a hoja A4 horizontal (~297mm) para que el maquetado coincida con HTML/PDF.
+                        page.set_viewport_size({"width": 1680, "height": 950})
                         page.emulate_media(media="screen")
                         page.goto(uri, wait_until="load")
+                        try:
+                            page.evaluate(
+                                """async () => {
+                                  try {
+                                    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+                                  } catch (e) {}
+                                }""",
+                            )
+                        except Exception:
+                            pass
                         pdf_bytes = page.pdf(
                             print_background=True,
                             prefer_css_page_size=True,
@@ -697,9 +854,13 @@ def manual_to_pdf(manual: Manual) -> PdfBuildResult:
             return PdfBuildResult(content=pdf, engine="weasyprint", styled=True)
         except Exception as e_wp:
             logger.warning(
-                "Guía rápida: WeasyPrint no disponible o falló; intentando navegador (Playwright/Chromium).",
+                "Guía rápida: WeasyPrint no disponible o falló; intentando Chrome/Edge (CLI) u otro navegador.",
                 exc_info=e_wp,
             )
+            cli_out = _try_quick_guide_headless_cli_pdf(html, base)
+            if cli_out is not None:
+                pdf_body, cli_engine = cli_out
+                return PdfBuildResult(content=pdf_body, engine=cli_engine, styled=True)
             pw_out = _try_quick_guide_playwright(html, base)
             if pw_out is not None:
                 pdf_body, pw_engine = pw_out

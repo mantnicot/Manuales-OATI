@@ -18,20 +18,16 @@ Detalles de arranque: ver `docs/MANUAL_TECNICO.txt` o `Iniciar-Manuales-OATI.bat
 
 ## PDF de guías rápidas (diseño y estilos)
 
-El PDF maquetado (la misma apariencia que el HTML/CSS del editor) se obtiene sobre todo con **WeasyPrint** (Linux/Docker con sus dependencias instaladas).
+El PDF maquetado (la misma apariencia que el HTML/CSS del editor) se obtiene con **WeasyPrint** cuando está instalado (típico en Linux/Docker con dependencias de sistema).
 
-En **Windows**, si WeasyPrint no está disponible, el backend usa **Playwright** apoyándose primero en **Chrome o Edge que ya estén instalados** (no descarga Chromium por CDN). Solo hace falta el paquete Python:
+Si WeasyPrint falla (muy habitual en **Windows**):
 
-```bash
-cd backend
-pip install playwright
-```
+1. La API intenta **Edge o Chrome del sistema** en modo headless con ``--print-to-pdf`` (**no** hace falta ``playwright install chromium`` ni una red que descargue navegadores).
+2. Si eso no sirve, puede usarse **Playwright** (``pip install playwright``) con canales `chrome`/`msedge`/`chromium`.
 
-Solo necesitarías `python -m playwright install chromium` si quieres forzar el binario integrado (`PLAYWRIGHT_PDF_CHANNEL=chromium`), p. ej. en un servidor sin Chrome/Edge pero con red para descargar.
+Opcional: variable **`PLAYWRIGHT_PDF_CHANNEL`** = `chrome` | `msedge` | `chromium`.
 
-Variable opcional **`PLAYWRIGHT_PDF_CHANNEL`**: `chrome` | `msedge` | `chromium`.
-
-Si Playwright también falla, el API puede generar un PDF plano con **ReportLab**. Las respuestas de `GET /api/v1/manuals/{id}/export.pdf` incluyen **`X-Manuales-Pdf-Styled: 1`** cuando lleva HTML/CSS maquetado, y **`0`** en modo simple.
+Si todo lo anterior falla, el API genera un PDF **plano con ReportLab** (sin maquetación). Las respuestas de `GET /api/v1/manuals/{id}/export.pdf` llevan **`X-Manuales-Pdf-Styled: 1`** con HTML/CSS, y **`0`** en modo plano.
 
 ## Repositorio
 

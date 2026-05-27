@@ -365,6 +365,11 @@
                 [src]="prevSrc"
                 title="Vista previa — mismo resultado que PDF y HTML exportado"
               ></iframe>
+              <div class="preview-foot-chrome" aria-hidden="true">
+                <span class="preview-foot-text">OATI — Oficina Asesora de Tecnologías de la Información</span>
+                <span class="preview-foot-page">Página {{ selectedPageIdx() + 1 }} / {{ pageBlocks().length }}</span>
+                <img class="preview-foot-oati" src="/oati-icon.svg" alt="" width="32" height="32" />
+              </div>
             } @else {
               <p class="server-muted server-preview-placeholder">Cargando vista previa…</p>
             }
@@ -444,6 +449,11 @@
                     (pointerdown)="beginResize($event, selectedPageIdx(), ci)"
                   ></button>
                 </div>
+              </div>
+              <div class="sheet-foot-strip">
+                <span class="foot-text-mini">OATI — Oficina Asesora de Tecnologías de la Información</span>
+                <span class="foot-page-mini">Página {{ selectedPageIdx() + 1 }} / {{ pageBlocks().length }}</span>
+                <img class="foot-oati-icon" src="/oati-icon.svg" alt="OATI" width="28" height="28" />
               </div>
             </div>
           </details>
